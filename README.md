@@ -1,5 +1,8 @@
 # AI Signal Tracker
 
+[![CI](https://github.com/josephs-ai/twitter-info-grabber/workflows/CI/badge.svg)](https://github.com/josephs-ai/twitter-info-grabber/actions)
+[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
+
 Follows a curated set of AI researchers on X and surfaces only the posts that
 are both **new** and **worth reading** — then extracts the actual findings, so
 you get the information rather than a reading list.
@@ -85,19 +88,21 @@ schtasks /create /tn "AI Signal" /tr "C:\path\to\run.cmd daily" /sc daily /st 07
 
 ### Platform notes
 
-Developed and tested on **Linux (Ubuntu/GNOME, Wayland)**. The code has no
-Linux-only calls — paths go through `pathlib`, links open via `webbrowser`, and
-the pipeline is pure Python — but **macOS and Windows are untested**. If you hit
-something, it is likely in one of these:
+Tested in CI on **Linux, macOS and Windows**, against Python 3.11 and 3.13.
 
-- **The desktop app's GUI backend.** pywebview uses WebKit2GTK on Linux, Cocoa
-  on macOS, and WebView2 on Windows. The macOS and Windows dependencies install
-  from PyPI automatically; Linux needs system packages
-  (`gir1.2-webkit2-4.1`, `python3-gi`) that pip cannot provide.
-- **Everything else is portable.** Collection, dedup, judging and extraction are
-  Python plus SQLite plus a headless browser.
+The one genuinely platform-specific piece is the desktop app's GUI backend:
+pywebview uses WebKit2GTK on Linux, Cocoa on macOS, and WebView2 on Windows.
+The macOS and Windows dependencies come from PyPI automatically; Linux needs
+system packages pip cannot provide (`python3-gi`, `gir1.2-webkit2-4.1`).
 
-Reports from either platform are welcome — see Contributing.
+Everything else — collection, dedup, judging, extraction — is Python, SQLite
+and a headless browser.
+
+Run the same checks locally:
+
+```bash
+python tests/smoke.py
+```
 
 ---
 
