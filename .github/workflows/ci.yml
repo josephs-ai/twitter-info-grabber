@@ -1,0 +1,123 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: ${{ matrix.os }} / py${{ matrix.python }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false          # one platform failing should not hide the others
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python: ["3.11", "3.13"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip setuptools wheel
+          python -m pip install -r requirements.txt
+
+      # The GUI backend is the one genuinely platform-specific piece. On Linux
+      # it needs system packages pip cannot provide.
+      - name: Install GTK/WebKit (Linux only)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq python3-gi gir1.2-webkit2-4.1 libgirepository1.0-dev
+
+      - name: Every module imports
+        run: |
+          python -c "
+          import importlib
+          mods = ['db','parse','accounts','collect','context','threads','embed',
+                  'novelty','amplify','links','replies','suggest','judge',
+                  'extract','digest','feedback','pipeline','cli']
+          for m in mods:
+              importlib.import_module(f'tracker.{m}')
+              print(f'  ok  tracker.{m}')
+          "
+
+      - name: CLI responds
+        run: python -m tracker --help
+
+      - name: Schema applies and migrations run
+        run: |
+          python -c "
+          from tracker import db
+          c = db.connect('ci.db')
+          tables = sorted(r[0] for r in c.execute(
+              \"SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'\"))
+          assert len(tables) >= 11, tables
+          print('tables:', ', '.join(tables))
+          db.connect('ci.db').close()   # reconnect must be idempotent
+          "
+
+      - name: Parser handles a real payload shape
+        run: |
+          python -c "
+          from tracker import parse
+          body = {'data': {'x': {'instructions': [{'entries': [{'content': {'itemContent':
+            {'tweet_results': {'result': {
+              '__typename': 'Tweet', 'rest_id': '1',
+              'core': {'user_results': {'result': {'core': {'screen_name': 'a', 'name': 'A'}}}},
+              'legacy': {'full_text': 'hello world', 'created_at': 'Sun Aug 02 03:00:09 +0000 2026',
+                         'entities': {}}}}}}}]}]}}}
+          posts = parse.posts_from_response(body)
+          assert len(posts) == 1 and posts[0]['author_handle'] == 'a', posts
+          assert posts[0]['created_at'].startswith('2026-08-02'), posts[0]['created_at']
+          print('parsed:', posts[0]['id'], posts[0]['author_handle'])
+          "
+
+      - name: Dedup maths behaves
+        run: |
+          python -c "
+          from tracker import embed, novelty
+          lex = embed.BACKENDS[0]
+          a = 'RL fine-tuning shows diminishing returns past 3 epochs'
+          rt = '@x ' + a + ' https://t.co/abc'
+          assert float(lex.encode(a) @ lex.encode(rt)) >= 0.92, 'repost should match'
+          assert float(lex.encode(a) @ lex.encode('carbonara recipe')) < 0.3
+          assert not embed.has_signal('RT @a: https://t.co/x'), 'link-only has no signal'
+          assert embed.has_signal(a)
+          assert novelty.classify(0.95) == 'duplicate'
+          assert novelty.classify(0.75) == 'ambiguous'
+          assert novelty.classify(0.30) == 'novel'
+          print('dedup ok')
+          "
+
+      - name: Thread stitching does not swallow discussions
+        run: |
+          python -c "
+          from tracker import db, threads
+          c = db.connect('t.db')
+          def add(i, who, conv, t, txt):
+              c.execute('INSERT INTO posts (id,author_handle,author_name,text,created_at,'
+                        'fetched_at,conversation_id,is_retweet,capture_source,urls) '
+                        \"VALUES (?,?,'',?,?,?,?,0,'timeline','[]')\", (i,who,txt,t,t,conv))
+              c.execute('INSERT INTO triage (post_id,stage,updated_at) '
+                        \"VALUES (?,'collected',?)\", (i,t))
+          add('1','a','c1','2026-08-01T00:00:00','1/2 first')
+          add('2','a','c1','2026-08-01T00:01:00','2/2 second')
+          add('3','b','c2','2026-08-01T01:00:00','a claim')
+          add('4','c','c2','2026-08-01T01:05:00','a reply from someone else')
+          c.commit()
+          r = threads.apply(c, dry_run=False)
+          assert r['threads'] == 1, r
+          assert c.execute(\"SELECT thread_root_id FROM posts WHERE id='3'\").fetchone()[0] is None
+          print('threads ok:', r['threads'], 'thread,', r['posts_folded'], 'folded')
+          "
+
+      - name: Pipeline runs offline stages end to end
+        run: python -m tracker --db ci.db daily --skip collect replies suggest links judge extract
