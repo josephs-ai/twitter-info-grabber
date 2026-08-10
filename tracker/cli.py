@@ -10,6 +10,7 @@ from . import amplify as amplify_mod
 from . import collect as collect_mod
 from . import db
 from . import digest as digest_mod
+from . import extract as extract_mod
 from . import feedback as feedback_mod
 from . import judge as judge_mod
 from . import links as links_mod
@@ -335,6 +336,15 @@ def cmd_links(args) -> int:
         conn.close()
 
 
+def cmd_extract(args) -> int:
+    conn = db.connect(args.db)
+    try:
+        return extract_mod.run(conn, limit=args.limit, effort=args.effort,
+                               force=args.force)
+    finally:
+        conn.close()
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(prog="tracker", description="AI signal tracker")
     parser.add_argument("--db", default=str(db.DEFAULT_DB))
@@ -426,6 +436,12 @@ def main(argv=None) -> int:
     p.add_argument("rating", choices=["good", "bad"])
     p.add_argument("--note", help="why — this text goes into the judge prompt")
     p.set_defaults(func=cmd_rate)
+
+    p = sub.add_parser("extract", help="pull claims, numbers and entities from surfaced posts")
+    p.add_argument("--limit", type=int, default=15)
+    p.add_argument("--effort", default="medium")
+    p.add_argument("--force", action="store_true", help="re-extract even if done")
+    p.set_defaults(func=cmd_extract)
 
     p = sub.add_parser("digest", help="render surfaced posts to Markdown")
     p.add_argument("--since", type=int, default=24, help="hours to look back")

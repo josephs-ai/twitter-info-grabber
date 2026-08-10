@@ -6,7 +6,7 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 
-from . import db
+from . import db, extract
 
 ROOT = Path(__file__).resolve().parent.parent
 OUT_DIR = ROOT / "digests"
@@ -47,7 +47,12 @@ def gather(conn, since_hours: int, limit: int, min_value: int | None = None) -> 
         """,
         (*params, f"-{since_hours} hours", limit),
     ).fetchall()
-    return [dict(r) for r in rows]
+    items = []
+    for row in rows:
+        item = dict(row)
+        item["extraction"] = extract.for_post(conn, item["id"])
+        items.append(item)
+    return items
 
 
 def counts(conn, since_hours: int) -> dict:
@@ -105,11 +110,39 @@ def render(items: list[dict], stats: dict, title_date: str, relaxed: bool) -> st
                 f"novelty {item['novelty']} · value {item['value']}{tag}"
             )
             lines.append("")
-            for para in item["text"].strip().split("\n"):
-                if para.strip():
-                    lines.append(f"> {para.strip()}")
-            lines.append("")
-            lines.append(f"*{item['rationale']}*")
+
+            ex = item.get("extraction")
+            if ex and ex.get("headline"):
+                # Lead with what happened; the raw post is evidence, not the story.
+                lines.append(f"**{ex['headline']}**")
+                lines.append("")
+                for claim in ex.get("claims", [])[:4]:
+                    lines.append(f"- {claim}")
+                if ex.get("numbers"):
+                    figures = ", ".join(f"**{n['value']}** {n['measures']}"
+                                        for n in ex["numbers"][:4])
+                    lines.append(f"- Figures: {figures}")
+                if ex.get("so_what"):
+                    lines.append("")
+                    lines.append(f"Why it matters: {ex['so_what']}")
+                if ex.get("entities"):
+                    names = ", ".join(e["name"] for e in ex["entities"][:8])
+                    lines.append("")
+                    lines.append(f"`{names}`")
+                lines.append("")
+                lines.append("<details><summary>original post</summary>")
+                lines.append("")
+                for para in item["text"].strip().split("\n"):
+                    if para.strip():
+                        lines.append(f"> {para.strip()}")
+                lines.append("")
+                lines.append("</details>")
+            else:
+                for para in item["text"].strip().split("\n"):
+                    if para.strip():
+                        lines.append(f"> {para.strip()}")
+                lines.append("")
+                lines.append(f"*{item['rationale']}*")
             lines.append("")
             lines.append(f"[open](https://x.com/{handle}/status/{item['id']})")
             lines.append("")

@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>AI Signal Tracker</title>
+<style>
+  :root {
+    --bg: #14161a; --panel: #1b1e24; --panel2: #21252c; --line: #2c313a;
+    --fg: #e6e9ef; --dim: #8b93a3; --accent: #6ea8fe; --good: #4ec9a5;
+    --bad: #e5766e; --warn: #d9a84e;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: #f6f7f9; --panel: #fff; --panel2: #eef1f5; --line: #dde2ea;
+      --fg: #1b1f27; --dim: #667085; --accent: #2f6fdb; --good: #17886b;
+      --bad: #c0453b; --warn: #a3730f;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg);
+    font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+    display: grid; grid-template-columns: 190px 1fr; height: 100vh; overflow: hidden;
+  }
+  nav {
+    background: var(--panel); border-right: 1px solid var(--line);
+    padding: 14px 10px; display: flex; flex-direction: column; gap: 3px; overflow-y: auto;
+  }
+  .brand { font-weight: 650; padding: 4px 8px 12px; letter-spacing: .2px; }
+  nav button {
+    background: none; border: 0; color: var(--dim); text-align: left;
+    padding: 7px 9px; border-radius: 7px; cursor: pointer; font: inherit;
+  }
+  nav button:hover { background: var(--panel2); color: var(--fg); }
+  nav button.on { background: var(--accent); color: #fff; }
+  nav .sep { margin-top: 14px; font-size: 11px; text-transform: uppercase;
+             letter-spacing: .8px; color: var(--dim); padding: 4px 9px; }
+  main { overflow-y: auto; padding: 20px 24px 60px; }
+  h1 { font-size: 19px; margin: 0 0 3px; }
+  .sub { color: var(--dim); font-size: 13px; margin-bottom: 18px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; }
+  .stat { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
+  .stat b { display: block; font-size: 22px; font-weight: 650; }
+  .stat span { color: var(--dim); font-size: 12px; }
+  .card {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 11px;
+    padding: 14px 16px; margin-bottom: 12px;
+  }
+  .meta { display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
+          font-size: 12px; color: var(--dim); margin-bottom: 8px; }
+  .who { color: var(--accent); font-weight: 600; cursor: pointer; }
+  .pill { background: var(--panel2); border-radius: 20px; padding: 2px 8px; }
+  .pill.amp { color: var(--warn); }
+  .headline { font-size: 15.5px; font-weight: 620; line-height: 1.45; margin-bottom: 9px; }
+  .claims { margin: 0 0 10px; padding-left: 18px; }
+  .claims li { margin-bottom: 4px; }
+  .nums { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+  .num { background: var(--panel2); border: 1px solid var(--line); border-radius: 7px;
+         padding: 4px 9px; font-size: 12.5px; }
+  .num b { color: var(--accent); }
+  .sowhat { color: var(--dim); font-size: 13px; margin-bottom: 10px; }
+  .orig { margin-bottom: 10px; }
+  .orig summary { color: var(--dim); font-size: 12px; cursor: pointer; }
+  .text { white-space: pre-wrap; word-break: break-word; margin-bottom: 10px; }
+  .why { color: var(--dim); font-style: italic; font-size: 13px;
+         border-left: 2px solid var(--line); padding-left: 10px; margin-bottom: 10px; }
+  .imgs { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+  .imgs img { max-width: 260px; max-height: 190px; border-radius: 8px; border: 1px solid var(--line); }
+  .row { display: flex; gap: 7px; align-items: center; flex-wrap: wrap; }
+  button.act {
+    background: var(--panel2); color: var(--fg); border: 1px solid var(--line);
+    border-radius: 7px; padding: 5px 11px; cursor: pointer; font: inherit; font-size: 13px;
+  }
+  button.act:hover { border-color: var(--accent); }
+  button.act.good.on { background: var(--good); border-color: var(--good); color: #fff; }
+  button.act.bad.on  { background: var(--bad);  border-color: var(--bad);  color: #fff; }
+  .empty { color: var(--dim); padding: 30px 0; }
+  .log { background: var(--panel); border: 1px solid var(--line); border-radius: 9px;
+         padding: 10px 12px; font-family: ui-monospace, monospace; font-size: 12px;
+         white-space: pre-wrap; color: var(--dim); margin-top: 12px; max-height: 220px; overflow-y: auto; }
+  .cand { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+  .tabs { display: flex; gap: 6px; margin-bottom: 14px; }
+  .spin { display: inline-block; width: 11px; height: 11px; border: 2px solid var(--line);
+          border-top-color: var(--accent); border-radius: 50%; animation: r .7s linear infinite; }
+  @keyframes r { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+<nav>
+  <div class="brand">AI Signal</div>
+  <button data-v="home" class="on">Overview</button>
+  <div class="sep">Read</div>
+  <button data-v="surfaced">Surfaced</button>
+  <button data-v="amplified">Most shared</button>
+  <div class="sep">Train</div>
+  <button data-v="unrated">Rate queue</button>
+  <button data-v="nearmiss">Near misses</button>
+  <div class="sep">Grow</div>
+  <button data-v="candidates">Candidates</button>
+  <div class="sep">Run</div>
+  <button data-v="pipeline">Pipeline</button>
+</nav>
+<main id="main"><div class="empty">Loading…</div></main>
+
+<script>
+const api = () => window.pywebview.api;
+const $ = (h) => { const d = document.createElement('div'); d.innerHTML = h; return d; };
+const esc = (s) => (s || '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+let view = 'home';
+
+function when(iso) {
+  if (!iso) return '';
+  const d = new Date(iso), h = (Date.now() - d) / 36e5;
+  if (h < 24) return Math.max(1, Math.round(h)) + 'h ago';
+  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+}
+
+function card(it, showRate) {
+  const tags = [];
+  if (it.thread_size > 1) tags.push(`<span class="pill">thread · ${it.thread_size}</span>`);
+  if (it.capture_source === 'reply') tags.push(`<span class="pill">reply</span>`);
+  if (it.amplifiers > 0) tags.push(`<span class="pill amp">shared by ${it.amplifiers}</span>`);
+  if (it.novelty) tags.push(`<span class="pill">n${it.novelty} · v${it.value}</span>`);
+  if (it.category) tags.push(`<span class="pill">${esc(it.category)}</span>`);
+
+  return `<div class="card" data-id="${it.id}">
+    <div class="meta">
+      <span class="who" onclick="openExt('${it.url}')">@${esc(it.author_handle)}</span>
+      <span>${when(it.created_at)}</span>${tags.join('')}
+    </div>
+    ${it.extraction && it.extraction.headline ? `
+      <div class="headline">${esc(it.extraction.headline)}</div>
+      ${(it.extraction.claims || []).length ? `<ul class="claims">${
+        it.extraction.claims.slice(0,4).map(c => `<li>${esc(c)}</li>`).join('')}</ul>` : ''}
+      ${(it.extraction.numbers || []).length ? `<div class="nums">${
+        it.extraction.numbers.slice(0,4).map(n =>
+          `<span class="num"><b>${esc(n.value)}</b> ${esc(n.measures)}</span>`).join('')}</div>` : ''}
+      ${it.extraction.so_what ? `<div class="sowhat">Why it matters: ${esc(it.extraction.so_what)}</div>` : ''}
+      <details class="orig"><summary>original post</summary><div class="text">${esc(it.text)}</div></details>
+    ` : `<div class="text">${esc(it.text)}</div>`}
+    ${it.images && it.images.length ? `<div class="imgs">${it.images.map(u =>
+       `<img src="${u}" loading="lazy">`).join('')}</div>` : ''}
+    ${it.rationale ? `<div class="why">${esc(it.rationale)}</div>` : ''}
+    ${showRate ? `<div class="row">
+      <button class="act good ${it.rating === 'good' ? 'on' : ''}" onclick="rate('${it.id}','good',this)">Good</button>
+      <button class="act bad ${it.rating === 'bad' ? 'on' : ''}" onclick="rate('${it.id}','bad',this)">Not useful</button>
+      <button class="act" onclick="openExt('${it.url}')">Open on X</button>
+    </div>` : `<div class="row"><button class="act" onclick="openExt('${it.url}')">Open on X</button></div>`}
+  </div>`;
+}
+
+async function rate(id, r, el) {
+  const card = el.closest('.card');
+  const already = el.classList.contains('on');
+  const stats = already ? await api().unrate(id) : await api().rate(id, r, '');
+  card.querySelectorAll('.act.good,.act.bad').forEach(b => b.classList.remove('on'));
+  if (!already) el.classList.add('on');
+  const badge = document.getElementById('fbcount');
+  if (badge) badge.textContent = `${stats.good} good / ${stats.bad} not useful · ${stats.disagreements} disagreements`;
+}
+
+function openExt(u) { api().open_external(u); }
+
+async function render() {
+  const main = document.getElementById('main');
+  main.innerHTML = '<div class="empty">Loading…</div>';
+
+  if (view === 'home') {
+    const o = await api().overview();
+    const f = o.funnel || {};
+    main.innerHTML = `<h1>Overview</h1>
+      <div class="sub">Everything collected, and what happened to it.</div>
+      <div class="grid">
+        ${[['posts collected', o.posts], ['distinct authors', o.authors],
+           ['accounts tracked', o.accounts], ['judged', o.judged],
+           ['surfaced', o.surfaced], ['new candidates', o.candidates]]
+          .map(([k, v]) => `<div class="stat"><b>${v}</b><span>${k}</span></div>`).join('')}
+      </div>
+      <h1 style="margin-top:26px">Pipeline funnel</h1>
+      <div class="sub">Nothing is deleted — dropped posts stay queryable.</div>
+      <div class="grid">
+        ${Object.entries(f).sort((a,b)=>b[1]-a[1]).map(([k, v]) =>
+          `<div class="stat"><b>${v}</b><span>${esc(k)}</span></div>`).join('')}
+      </div>
+      <h1 style="margin-top:26px">Your calibration</h1>
+      <div class="sub" id="fbcount">${o.feedback.good} good / ${o.feedback.bad} not useful · ${o.feedback.disagreements} disagreements</div>
+      ${o.feedback.total === 0 ? `<div class="card">The judge is running on generic taste.
+        Rate a few items under <b>Rate queue</b> — especially ones you disagree with —
+        and they become calibration examples in its prompt.</div>` : ''}`;
+    return;
+  }
+
+  if (view === 'candidates') {
+    main.innerHTML = `<h1>Discovered accounts</h1>
+      <div class="sub">Found by who your accounts follow, and who replies under their posts.</div>
+      <div class="tabs">
+        <button class="act" onclick="loadCands('follows',this)">By follow graph</button>
+        <button class="act" onclick="loadCands('replies',this)">By replies</button>
+      </div><div id="cands"></div>`;
+    loadCands('follows');
+    return;
+  }
+
+  if (view === 'pipeline') {
+    main.innerHTML = `<h1>Pipeline</h1>
+      <div class="sub">Same stages the scheduled run uses. Runs in the background.</div>
+      <div class="row">${['collect','links','amplify','threads','dedup','judge','digest']
+        .map(s => `<button class="act" id="btn-${s}" onclick="runStage('${s}')">${s}</button>`).join('')}</div>
+      <div class="log" id="log">idle</div>`;
+    return;
+  }
+
+  const items = await api().feed(view, 40);
+  const titles = {
+    surfaced: ['Surfaced', 'Posts that cleared the bar.'],
+    amplified: ['Most shared', 'Originals several tracked accounts independently shared.'],
+    unrated: ['Rate queue', 'Teach the judge your taste. Disagreements teach it most.'],
+    nearmiss: ['Near misses', 'Skipped, but scored well. Good place to find judge mistakes.'],
+  }[view];
+  main.innerHTML = `<h1>${titles[0]}</h1><div class="sub">${titles[1]}</div>` +
+    (items.length ? items.map(it => card(it, view === 'unrated' || view === 'nearmiss')).join('')
+                  : `<div class="empty">Nothing here yet.</div>`);
+}
+
+async function loadCands(by, el) {
+  if (el) document.querySelectorAll('.tabs .act').forEach(b => b.classList.remove('on'));
+  if (el) el.classList.add('on');
+  const rows = await api().candidates(by, 40);
+  document.getElementById('cands').innerHTML = rows.length ? rows.map(c => `
+    <div class="card cand" data-h="${esc(c.handle)}">
+      <div>
+        <div><span class="who" onclick="openExt('https://x.com/${esc(c.handle)}')">@${esc(c.handle)}</span>
+          <span class="pill">follows ${c.seed_count}</span>
+          <span class="pill">replies ${c.reply_count}</span></div>
+        <div class="sub" style="margin:4px 0 0">${esc((c.bio || '').slice(0, 130))}</div>
+      </div>
+      <div class="row">
+        <button class="act" onclick="approve('${esc(c.handle)}',this)">Track</button>
+        <button class="act" onclick="reject('${esc(c.handle)}',this)">Hide</button>
+      </div>
+    </div>`).join('') : `<div class="empty">None yet — run the pipeline.</div>`;
+}
+
+async function approve(h, el) { await api().approve(h); el.closest('.card').remove(); }
+async function reject(h, el) { await api().reject(h); el.closest('.card').remove(); }
+
+async function runStage(s) {
+  const log = document.getElementById('log');
+  const btn = document.getElementById('btn-' + s);
+  const res = await api().run_stage(s);
+  if (!res.ok) { log.textContent = res.error; return; }
+  btn.innerHTML = `${s} <span class="spin"></span>`;
+  log.textContent = `${s} running…`;
+}
+
+window.onStageDone = (p) => {
+  const btn = document.getElementById('btn-' + p.stage);
+  if (btn) btn.textContent = p.stage;
+  const log = document.getElementById('log');
+  if (log) log.textContent = `${p.stage} ${p.ok ? 'finished' : 'FAILED'}\n\n${p.output}`;
+};
+
+document.querySelectorAll('nav button').forEach(b => b.onclick = () => {
+  document.querySelectorAll('nav button').forEach(x => x.classList.remove('on'));
+  b.classList.add('on'); view = b.dataset.v; render();
+});
+
+window.addEventListener('pywebviewready', render);
+if (window.pywebview) render();
+</script>
+</body>
+</html>

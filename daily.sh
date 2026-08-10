@@ -40,6 +40,9 @@ log "dedup"
 log "judging"
 ./run judge --limit 60 || log "judge failed"
 
+log "extracting information"
+./run extract --limit 15 || log "extract failed"
+
 log "digest"
 ./run digest
 

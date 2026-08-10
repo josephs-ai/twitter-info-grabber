@@ -164,3 +164,21 @@ CREATE TABLE IF NOT EXISTS media (
     analysed_at TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_media_post ON media(post_id);
+
+-- Structured facts pulled out of a post, so the digest can tell you WHAT
+-- happened instead of handing you the raw text to read yourself.
+-- One row per post per prompt version, mirroring judgements.
+CREATE TABLE IF NOT EXISTS extractions (
+    id             INTEGER PRIMARY KEY,
+    post_id        TEXT NOT NULL REFERENCES posts(id),
+    model          TEXT NOT NULL,
+    prompt_version TEXT NOT NULL,
+    headline       TEXT,     -- one sentence: what is actually new here
+    claims         TEXT,     -- JSON array of specific factual claims
+    entities       TEXT,     -- JSON array of {name, kind}
+    numbers        TEXT,     -- JSON array of concrete figures with units
+    so_what        TEXT,     -- why a practitioner should care
+    created_at     TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_extractions_post ON extractions(post_id);
+CREATE INDEX IF NOT EXISTS idx_extractions_ver  ON extractions(prompt_version);
