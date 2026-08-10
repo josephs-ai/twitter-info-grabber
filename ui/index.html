@@ -357,9 +357,13 @@ async function render() {
       <h1 style="font-size:15px">What was filtered, and why</h1>
       <div class="lede">Nothing is deleted. Every dropped post keeps its reason.</div>
       <div class="metrics">
-        ${Object.entries(f).sort((a, b) => b[1] - a[1]).map(([k, v]) =>
-          `<div class="metric"><b>${num(v)}</b><span>${esc(k.replace(/_/g, ' '))}</span></div>`).join('')}
+        ${[['duplicate', 'said already'], ['thread_part', 'folded into a thread'],
+           ['no_text', 'link or emoji only'], ['low_value', 'judged not worth it']]
+          .filter(([k]) => f[k]).map(([k, label]) =>
+          `<div class="metric"><b>${num(f[k])}</b><span>${label}</span></div>`).join('')}
       </div>
+      <div class="lede">Still moving through the pipeline:
+        ${num(f.collected || 0)} awaiting dedup, ${num(f.triaged || 0)} awaiting the judge.</div>
       <h1 style="font-size:15px">Calibration</h1>
       <div class="lede" id="fbc">${o.feedback.good} useful · ${o.feedback.bad} not ·
         ${o.feedback.disagreements} disagreements</div>
