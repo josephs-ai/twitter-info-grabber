@@ -67,6 +67,13 @@ Then add your key to `.env` and sign in to a burner account:
 `./run` and `run.cmd` are thin wrappers around `python -m tracker`, which works
 directly if you prefer.
 
+**Linux desktop launcher** — to start the app from your app grid instead of a
+terminal:
+
+```bash
+./install-desktop.sh     # remove with: rm ~/.local/share/applications/ai-signal-tracker.desktop
+```
+
 ### Scheduling
 
 `daily` is idempotent, so run it as often as you like. Three times a day is
