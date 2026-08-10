@@ -168,6 +168,56 @@ h1 {
   border-left: 1px solid var(--rule); padding-left: 13px;
 }
 
+/* --- schedule page ------------------------------------------------------- */
+.field { margin-bottom: 22px; }
+.field > label {
+  display: block; font: 10px/1 var(--mono); letter-spacing: .16em;
+  text-transform: uppercase; color: var(--faint); margin-bottom: 9px;
+}
+.field .hint { color: var(--muted); font-size: 12.5px; margin: -4px 0 9px; }
+.choices { display: flex; gap: 8px; flex-wrap: wrap; }
+.choice {
+  border: 1px solid var(--rule); padding: 9px 13px; cursor: pointer;
+  font: 12px/1.4 var(--sans); color: var(--muted); border-radius: 3px;
+}
+.choice:hover { border-color: var(--muted); color: var(--paper); }
+.choice.on { border-color: var(--signal); color: var(--paper); background: var(--raise); }
+.choice b { display: block; font: 500 12.5px/1.4 var(--sans); color: var(--paper); }
+.choice span { font: 10.5px/1.4 var(--mono); color: var(--faint); }
+.times { display: flex; gap: 7px; flex-wrap: wrap; align-items: center; }
+.times input {
+  background: var(--ink); color: var(--paper); border: 1px solid var(--rule);
+  font: 12px var(--mono); padding: 7px 9px; border-radius: 3px; width: 92px;
+}
+.times input:focus { outline: 1px solid var(--signal); }
+.stages-list { display: grid; gap: 2px; }
+.stg {
+  display: grid; grid-template-columns: 22px 1fr; gap: 10px; align-items: start;
+  padding: 8px 10px; border: 1px solid transparent; cursor: pointer; border-radius: 3px;
+}
+.stg:hover { border-color: var(--rule); }
+.stg .box {
+  width: 15px; height: 15px; border: 1px solid var(--rule); margin-top: 3px;
+  display: grid; place-items: center; font: 10px/1 var(--mono); color: var(--ink);
+}
+.stg.on .box { background: var(--signal); border-color: var(--signal); }
+.stg .box::after { content: ""; }
+.stg.on .box::after { content: "x"; }
+.stg b { font: 500 13px/1.4 var(--sans); }
+.stg span { display: block; font-size: 12px; color: var(--muted); }
+.stg.cost b::after { content: " · costs credit"; color: var(--signal);
+  font: 10px var(--mono); letter-spacing: .1em; }
+.banner {
+  border: 1px solid var(--rule); border-left: 2px solid var(--signal);
+  padding: 11px 14px; margin-bottom: 22px; font-size: 13px; color: var(--muted);
+}
+.banner b { color: var(--paper); font-weight: 500; }
+.cmd {
+  font: 11px/1.6 var(--mono); color: var(--faint); background: var(--panel);
+  border: 1px solid var(--rule); padding: 9px 11px; word-break: break-all;
+  margin-top: 10px;
+}
+
 /* --- controls ------------------------------------------------------------ */
 .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 button.act {
@@ -220,6 +270,7 @@ button.act.bad.on  { background: var(--rust); border-color: var(--rust); color: 
     <div class="group">Sources</div>
     <button data-v="candidates">Candidates</button>
     <button data-v="pipeline">Pipeline</button>
+  <button data-v="schedule">Schedule</button>
   </div>
   <div class="assay" id="assay"></div>
 </nav>
@@ -336,6 +387,121 @@ const COPY = {
   nearmiss:  ['Near misses', 'Skipped, but scored well. Where the judge is most likely wrong.'],
 };
 
+
+/* ---- schedule page ------------------------------------------------------ */
+let SCHED = null;
+
+async function renderSchedule(wrap) {
+  const st = await api().schedule_status();
+  SCHED = JSON.parse(JSON.stringify(st.settings));
+  const running = st.installed > 0;
+
+  wrap.innerHTML = `
+    <h1>Schedule</h1>
+    <p class="lede">When the pipeline runs on its own. Collection is the only
+    stage that cannot be caught up later — a post that scrolls off the timeline
+    before it is fetched is gone — so frequency is really a question about
+    collection.</p>
+
+    <div class="banner" id="sbanner">
+      ${running
+        ? `<b>Running automatically</b> — ${st.installed} scheduled ${st.installed === 1 ? 'entry' : 'entries'} on ${st.platform}.`
+        : `<b>Not scheduled.</b> Nothing runs unless you start it by hand.`}
+      ${st.last_run ? `<br>Last run ${when(st.last_run.started_at)} · ${esc(st.last_run.status || '')}` : ''}
+    </div>
+
+    <div class="field">
+      <label>How often</label>
+      <div class="choices" id="presets">
+        ${Object.entries(st.presets).map(([k, v]) =>
+          `<div class="choice" data-preset="${k}" onclick="pickPreset('${k}')">
+             <b>${esc(v.label)}</b><span>${v.times.join(' · ')}</span></div>`).join('')}
+      </div>
+    </div>
+
+    <div class="field">
+      <label>Times</label>
+      <div class="hint">Local time, 24-hour. Add or remove as many as you like.</div>
+      <div class="times" id="times"></div>
+    </div>
+
+    <div class="field">
+      <label>Days</label>
+      <div class="choices">
+        <div class="choice" data-days="everyday" onclick="pickDays('everyday')">Every day</div>
+        <div class="choice" data-days="weekdays" onclick="pickDays('weekdays')">Weekdays only</div>
+      </div>
+    </div>
+
+    <div class="field">
+      <label>What runs</label>
+      <div class="hint">Turn off anything you would rather run by hand. The two
+      marked below are the only ones that spend API credit.</div>
+      <div class="stages-list">
+        ${st.stage_info.map(s => `
+          <div class="stg ${['judge','extract'].includes(s.key) ? 'cost' : ''}"
+               data-stage="${s.key}" onclick="toggleStage('${s.key}')">
+            <div class="box"></div>
+            <div><b>${esc(s.label)}</b><span>${esc(s.note)}</span></div>
+          </div>`).join('')}
+      </div>
+    </div>
+
+    <div class="row">
+      <button class="act" onclick="saveSchedule(true)">${running ? 'Update schedule' : 'Turn on'}</button>
+      ${running ? `<button class="act" onclick="saveSchedule(false)">Turn off</button>` : ''}
+      <button class="act" onclick="stage('digest')">Run once now</button>
+    </div>
+    <div class="cmd" id="scmd">${esc(st.command)}</div>`;
+
+  paintSchedule();
+}
+
+function paintSchedule() {
+  const timesEl = document.getElementById('times');
+  timesEl.innerHTML = SCHED.times.map((t, i) =>
+    `<input type="time" value="${t}" onchange="setTime(${i}, this.value)">
+     <button class="act" onclick="delTime(${i})" title="remove">-</button>`).join('') +
+    `<button class="act" onclick="addTime()">+ add time</button>`;
+
+  document.querySelectorAll('[data-preset]').forEach(el => {
+    const p = SCHED.times.join(',');
+    el.classList.toggle('on', false);
+  });
+  document.querySelectorAll('[data-days]').forEach(el =>
+    el.classList.toggle('on', el.dataset.days === SCHED.days));
+  document.querySelectorAll('[data-stage]').forEach(el =>
+    el.classList.toggle('on', SCHED.stages.includes(el.dataset.stage)));
+}
+
+function pickPreset(key) {
+  api().schedule_status().then(st => {
+    SCHED.times = st.presets[key].times.slice();
+    paintSchedule();
+  });
+}
+function pickDays(d) { SCHED.days = d; paintSchedule(); }
+function setTime(i, v) { if (v) SCHED.times[i] = v; }
+function addTime() { SCHED.times.push('12:00'); paintSchedule(); }
+function delTime(i) {
+  if (SCHED.times.length > 1) { SCHED.times.splice(i, 1); paintSchedule(); }
+}
+function toggleStage(k) {
+  const i = SCHED.stages.indexOf(k);
+  if (i >= 0) { if (SCHED.stages.length > 1) SCHED.stages.splice(i, 1); }
+  else SCHED.stages.push(k);
+  paintSchedule();
+}
+
+async function saveSchedule(enable) {
+  SCHED.enabled = enable;
+  const banner = document.getElementById('sbanner');
+  banner.innerHTML = 'Writing schedule…';
+  const r = await api().schedule_save(SCHED);
+  if (!r.ok) { banner.innerHTML = `<b>Could not write the schedule.</b> ${esc(r.error || '')}`; return; }
+  render();
+}
+
 async function render() {
   const main = document.getElementById('main');
   main.innerHTML = '<div class="empty">reading database…</div>';
@@ -385,6 +551,8 @@ async function render() {
     cands('follows');
     return;
   }
+
+  if (view === 'schedule') { return renderSchedule(main); }
 
   if (view === 'pipeline') {
     main.innerHTML = `<div class="wide"><h1>Pipeline</h1>

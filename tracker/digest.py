@@ -162,7 +162,10 @@ def build(conn, since_hours: int = 24, limit: int = 15,
 
     stats = counts(conn, since_hours)
     today = datetime.now(timezone.utc)
-    markdown = render(items, stats, today.strftime("%A %-d %B %Y"), relaxed)
+    # %-d (no zero padding) is a glibc extension: it raises on Windows.
+    # Build the day number ourselves so the format is portable.
+    title_date = f"{today:%A} {today.day} {today:%B %Y}"
+    markdown = render(items, stats, title_date, relaxed)
 
     if write:
         OUT_DIR.mkdir(exist_ok=True)

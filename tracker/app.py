@@ -23,6 +23,7 @@ import webview
 from . import accounts as accounts_mod
 from . import extract as extract_mod
 from . import amplify, db, digest, feedback, novelty
+from . import schedule as schedule_mod
 
 ROOT = Path(__file__).resolve().parent.parent
 UI = ROOT / "ui" / "index.html"
@@ -158,6 +159,26 @@ class Api:
             conn.execute("UPDATE candidates SET status='rejected' WHERE handle=?", (handle,))
             conn.commit()
             return True
+        finally:
+            conn.close()
+
+    # -- schedule -------------------------------------------------------------
+
+    def schedule_status(self) -> dict:
+        conn = self._conn()
+        try:
+            return schedule_mod.status(conn)
+        finally:
+            conn.close()
+
+    def schedule_save(self, settings: dict) -> dict:
+        """Save and install in one action — a saved schedule that was never
+        written to the OS would be a lie."""
+        conn = self._conn()
+        try:
+            result = schedule_mod.install(conn, settings)
+            result["status"] = schedule_mod.status(conn)
+            return result
         finally:
             conn.close()
 

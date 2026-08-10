@@ -17,6 +17,7 @@ from . import links as links_mod
 from . import novelty as novelty_mod
 from . import pipeline as pipeline_mod
 from . import replies as replies_mod
+from . import schedule as schedule_mod
 from . import suggest as suggest_mod
 from . import threads as threads_mod
 
@@ -359,6 +360,31 @@ def cmd_app(args) -> int:
     return app_main()
 
 
+def cmd_schedule(args) -> int:
+    conn = db.connect(args.db)
+    try:
+        if args.install or args.disable:
+            settings = schedule_mod.load(conn)
+            if args.times:
+                settings["times"] = args.times
+            if args.days:
+                settings["days"] = args.days
+            settings["enabled"] = not args.disable
+            r = schedule_mod.install(conn, settings)
+            print("installed" if r.get("ok") else f"failed: {r.get('error')}",
+                  f"({r.get('entries', 0)} entries)")
+        st = schedule_mod.status(conn)
+        s = st["settings"]
+        print(f"\nenabled   {s['enabled']}")
+        print(f"times     {', '.join(s['times'])}  ({s['days']})")
+        print(f"stages    {len(s['stages'])} of 10")
+        print(f"installed {st['installed']} entries on {st['platform']}")
+        print(f"command   {st['command']}")
+        return 0
+    finally:
+        conn.close()
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(prog="tracker", description="AI signal tracker")
     parser.add_argument("--db", default=str(db.DEFAULT_DB))
@@ -387,6 +413,13 @@ def main(argv=None) -> int:
 
     p = sub.add_parser("app", help="open the desktop app")
     p.set_defaults(func=cmd_app)
+
+    p = sub.add_parser("schedule", help="show or set when the pipeline runs")
+    p.add_argument("--install", action="store_true", help="write it to cron/Task Scheduler")
+    p.add_argument("--disable", action="store_true", help="remove the schedule")
+    p.add_argument("--times", nargs="+", metavar="HH:MM")
+    p.add_argument("--days", choices=["everyday", "weekdays"])
+    p.set_defaults(func=cmd_schedule)
 
     p = sub.add_parser("stats", help="what is in the database")
     p.set_defaults(func=cmd_stats)
