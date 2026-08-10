@@ -50,6 +50,7 @@ class Api:
                 row = conn.execute(sql, a).fetchone()
                 return (row[0] if row else 0) or 0
 
+            _where, _params = strict_mod.clause(strict_mod.load(conn))
             funnel = {r["k"]: r["n"] for r in conn.execute(
                 "SELECT COALESCE(drop_reason, stage) k, COUNT(*) n FROM triage GROUP BY k")}
             fb = feedback.stats(conn)
@@ -59,7 +60,12 @@ class Api:
                 "accounts": scalar("SELECT COUNT(*) FROM accounts WHERE active=1"),
                 "candidates": scalar("SELECT COUNT(*) FROM candidates WHERE status='new'"),
                 "judged": scalar("SELECT COUNT(*) FROM judgements"),
-                "surfaced": scalar("SELECT COUNT(*) FROM judgements WHERE verdict='surface'"),
+                # The bar is a live setting, so this must be counted against it.
+                # Reading the frozen verdict here made the hero number disagree
+                # with the feed whenever the slider moved.
+                "surfaced": scalar(
+                    f"SELECT COUNT(DISTINCT post_id) FROM judgements j WHERE {_where}",
+                    *_params),
                 "funnel": funnel,
                 "feedback": fb,
                 "last_run": scalar("SELECT COUNT(*) FROM runs"),
@@ -100,18 +106,22 @@ class Api:
                     base + f" WHERE {where} ORDER BY j.value DESC, p.amplifiers DESC LIMIT ?",
                     (*params, limit)).fetchall()
                 return self._rows_to_items(conn, rows)
-            if mode == "_never":
-                sql = base
-            elif mode == "nearmiss":
-                sql = base + (" WHERE j.verdict='skip' AND j.value >= 3 "
+            level = strict_mod.load(conn)
+            where, params = strict_mod.clause(level)
+            if mode == "nearmiss":
+                # Below the current bar but within one point of it — move the
+                # slider and what counts as a near miss moves with it.
+                sql = base + (f" WHERE NOT ({where}) AND j.value >= ? "
                               "ORDER BY j.value DESC, j.novelty DESC")
+                args = [*params, max(1, level["value"] - 1)]
             elif mode == "unrated":
-                sql = base + (" WHERE j.post_id NOT IN (SELECT post_id FROM feedback) "
-                              "AND (j.verdict='surface' OR j.value >= 3) "
-                              "ORDER BY j.value DESC")
+                sql = base + (f" WHERE j.post_id NOT IN (SELECT post_id FROM feedback) "
+                              f"AND (({where}) OR j.value >= ?) ORDER BY j.value DESC")
+                args = [*params, max(1, level["value"] - 1)]
             else:  # amplified
                 sql = base + " WHERE p.amplifiers >= 2 ORDER BY p.amplifiers DESC"
-            rows = conn.execute(sql + " LIMIT ?", (limit,)).fetchall()
+                args = []
+            rows = conn.execute(sql + " LIMIT ?", (*args, limit)).fetchall()
             return self._rows_to_items(conn, rows)
         finally:
             conn.close()

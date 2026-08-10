@@ -13,10 +13,12 @@ fails is recorded as an error and never retried in a tight loop.
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import re
 import socket
 import urllib.error
+import urllib.parse
 import urllib.request
 from html import unescape
 
@@ -36,6 +38,42 @@ DESC_RE = re.compile(
 SKIP_HOSTS = ("t.co", "x.com", "twitter.com", "bit.ly")
 
 
+def is_safe_url(url: str) -> bool:
+    """Refuse anything that points inside our own network.
+
+    These URLs come from posts, and reply mining means an attacker only has to
+    reply to a tracked account to choose one. Without this, a crafted link makes
+    the tool fetch loopback services, private-range hosts, or a cloud metadata
+    endpoint, and store whatever came back in the database.
+    """
+    try:
+        parts = urllib.parse.urlsplit(url)
+    except ValueError:
+        return False
+    if parts.scheme not in ("http", "https"):
+        return False
+    host = parts.hostname
+    if not host:
+        return False
+    if host.lower() in ("localhost", "localhost.localdomain"):
+        return False
+    try:
+        # Check every address the name resolves to: a hostname can point at
+        # 127.0.0.1 just as easily as a literal can.
+        infos = socket.getaddrinfo(host, None)
+    except (socket.gaierror, UnicodeError):
+        return False
+    for info in infos:
+        try:
+            addr = ipaddress.ip_address(info[4][0])
+        except ValueError:
+            return False
+        if (addr.is_private or addr.is_loopback or addr.is_link_local
+                or addr.is_reserved or addr.is_multicast or addr.is_unspecified):
+            return False
+    return True
+
+
 def _clean(text: str) -> str:
     text = re.sub(r"<[^>]+>", " ", text or "")
     return " ".join(unescape(text).split())
@@ -45,6 +83,8 @@ def _fetch(url: str) -> tuple[str, str, str]:
     """Return (status, title, summary)."""
     if any(h in url.lower() for h in SKIP_HOSTS):
         return "skipped", "", ""
+    if not is_safe_url(url):
+        return "blocked", "", ""
 
     arxiv = ARXIV_RE.search(url)
     if arxiv:

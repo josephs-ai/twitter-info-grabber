@@ -202,6 +202,43 @@ def test_curation(tmp: Path) -> None:
     conn.close()
 
 
+def test_ssrf_guard() -> None:
+    print("\nlink safety")
+    from tracker import links
+
+    for url in ["http://127.0.0.1:8080/admin", "http://169.254.169.254/latest/meta-data/",
+                "http://localhost/x", "http://192.168.1.1/", "http://[::1]/",
+                "file:///etc/passwd", "ftp://example.com/x"]:
+        check(f"blocks {url[:38]}", not links.is_safe_url(url))
+    check("allows a normal https url", links.is_safe_url("https://example.com/"))
+
+
+def test_prune_stability(tmp: Path) -> None:
+    print("\nembedding prune")
+    from tracker import db, novelty
+
+    conn = db.connect(tmp / "p.db")
+    for i, age in enumerate([1, 5, 400, 500]):
+        conn.execute(
+            "INSERT INTO posts (id, author_handle, author_name, text, created_at,"
+            " fetched_at, is_retweet, capture_source, urls) VALUES (?,?,'',?,"
+            f"datetime('now','-{age} days'), datetime('now'), 0, 'timeline','[]')",
+            (str(i), "a", f"a post about scaling laws number {i}"))
+    conn.commit()
+
+    novelty.embed_pending(conn)
+    inside = conn.execute("SELECT COUNT(DISTINCT post_id) n FROM embeddings").fetchone()["n"]
+    check("only in-window posts embedded", inside == 2, f"({inside} of 4)")
+
+    # prune then embed must reach a fixed point, or the two churn every run
+    novelty.prune(conn)
+    again = novelty.embed_pending(conn)
+    removed = novelty.prune(conn)["removed"]
+    check("prune and embed reach a fixed point", again == 0 and removed == 0,
+          f"(re-embedded {again}, re-pruned {removed})")
+    conn.close()
+
+
 def main() -> int:
     print(f"python {sys.version.split()[0]} on {sys.platform}")
     with tempfile.TemporaryDirectory() as td:
@@ -213,6 +250,8 @@ def main() -> int:
         test_threads(tmp)
         test_context(tmp)
         test_curation(tmp)
+        test_ssrf_guard()
+        test_prune_stability(tmp)
 
     print(f"\n{PASSED} passed, {len(FAILED)} failed")
     if FAILED:

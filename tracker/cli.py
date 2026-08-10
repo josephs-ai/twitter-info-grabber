@@ -188,7 +188,12 @@ def cmd_dedup(args) -> int:
             for ex in r["examples"]:
                 print(f"  {ex['similarity']:.3f}  @{ex['author']}: {ex['text']}")
                 print(f"         matched @{ex['nearest_author']}: {ex['nearest_text']}")
-        if not args.apply:
+        if args.apply:
+            pr = novelty_mod.prune(conn, window_days=args.window)
+            if pr["removed"]:
+                print(f"\npruned {pr['removed']} vectors older than "
+                      f"{pr['cutoff_days']} days ({pr['remaining']} kept)")
+        else:
             print("\n(dry run — nothing written. re-run with --apply to record)")
         return 0
     finally:
@@ -328,7 +333,8 @@ def cmd_links(args) -> int:
     try:
         r = links_mod.resolve(conn, limit=args.limit)
         print(f"{r['attempted']} urls: {r.get('ok',0)} resolved, "
-              f"{r.get('skipped',0)} skipped, {r.get('error',0)} failed")
+              f"{r.get('skipped',0)} skipped, {r.get('error',0)} failed, "
+              f"{r.get('blocked',0)} blocked (private/loopback address)")
         rows = conn.execute(
             "SELECT site, title FROM links WHERE status='ok' AND title != '' "
             "ORDER BY fetched_at DESC LIMIT 6").fetchall()

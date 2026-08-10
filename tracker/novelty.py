@@ -28,15 +28,24 @@ NOVEL_AT = 0.60
 WINDOW_DAYS = 45
 
 
-def embed_pending(conn, batch: int = 500) -> int:
-    """Embed posts missing a vector, for every backend. Resumable."""
+def embed_pending(conn, batch: int = 500, window_days: int = WINDOW_DAYS,
+                  keep_margin: int = 30) -> int:
+    """Embed posts missing a vector, for every backend. Resumable.
+
+    Only posts inside the comparison window (plus the same margin prune keeps)
+    are embedded. Without that bound this fights prune(): it would re-create
+    every vector prune had just deleted, so the two would churn against each
+    other on every run and the database would never actually shrink.
+    """
     total = 0
+    cutoff = window_days + keep_margin
     for embedder in embed.BACKENDS:
         rows = conn.execute(
             "SELECT p.id, p.text FROM posts p "
             "LEFT JOIN embeddings e ON e.post_id = p.id AND e.model = ? "
-            "WHERE e.post_id IS NULL LIMIT ?",
-            (embedder.name, batch),
+            "WHERE e.post_id IS NULL "
+            "  AND p.created_at > datetime('now', ?) LIMIT ?",
+            (embedder.name, f"-{cutoff} days", batch),
         ).fetchall()
         if not rows:
             continue
@@ -71,6 +80,26 @@ def _load_window(conn, window_days: int, embedder, exclude_id: str | None = None
         return [], np.zeros((0, embedder.dim), dtype=np.float32)
     matrix = np.vstack([embed.from_blob(r["vector"], embedder.dim) for r in rows])
     return rows, matrix
+
+
+def prune(conn, window_days: int = WINDOW_DAYS, keep_margin: int = 30) -> dict:
+    """Drop embeddings for posts too old to be compared against.
+
+    Vectors are the bulk of the database — roughly 9KB per post across both
+    backends — and dedup only ever looks inside a rolling window. Keeping
+    vectors for posts far outside it costs gigabytes a year and buys nothing.
+    The posts themselves are never touched; re-embedding is one cheap local
+    pass if the window is ever widened.
+    """
+    cutoff = window_days + keep_margin
+    before = conn.execute("SELECT COUNT(*) n FROM embeddings").fetchone()["n"]
+    conn.execute(
+        "DELETE FROM embeddings WHERE post_id IN ("
+        "  SELECT id FROM posts WHERE created_at < datetime('now', ?))",
+        (f"-{cutoff} days",))
+    conn.commit()
+    after = conn.execute("SELECT COUNT(*) n FROM embeddings").fetchone()["n"]
+    return {"removed": before - after, "remaining": after, "cutoff_days": cutoff}
 
 
 def _window(conn, window_days: int):
