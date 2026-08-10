@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# Convenience wrapper: ./run collect --url ...
+# Prefers the project venv (numpy lives there); falls back to system python.
+cd "$(dirname "$0")"
+if [ -x .venv/bin/python ]; then exec .venv/bin/python -m tracker "$@"; fi
+exec python3 -m tracker "$@"

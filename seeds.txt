@@ -1,0 +1,93 @@
+# Tracked accounts. Edit freely — one per line: handle,category,note
+# Every handle below was verified against live X on 2026-08-05.
+# Lines starting with # are ignored.
+
+# --- prompt extraction / model archaeology -------------------------------
+elder_plinius,redteam,extracted the Fable 5 system prompt
+asgeirtj,redteam,maintains system_prompts_leaks archive
+
+# --- interpretability / model internals ----------------------------------
+ch402,interp,Chris Olah — mech interp
+NeelNanda5,interp,Neel Nanda — mech interp
+saprmarks,interp,Samuel Marks
+TransluceAI,interp,open-source interpretability tooling
+jxmnop,interp,Jack Morris — embedding inversion
+
+# --- evals & measurement --------------------------------------------------
+idavidrein,evals,David Rein — GPQA
+HamelHusain,evals,applied eval practice
+natolambert,evals,Nathan Lambert — post-training, Interconnects
+
+# --- systems / inference / efficiency -------------------------------------
+tri_dao,systems,FlashAttention
+Tim_Dettmers,systems,quantization
+danielhanchen,systems,Unsloth
+vllm_project,systems,serving
+
+# --- post-training / RL ---------------------------------------------------
+willccbb,posttrain,Will Brown
+corbtt,posttrain,Kyle Corbitt — OpenPipe
+
+# --- practitioners --------------------------------------------------------
+simonw,practitioner,Simon Willison
+eugeneyan,practitioner,Eugene Yan
+swyx,practitioner,swyx
+giffmana,practitioner,Lucas Beyer
+_jasonwei,practitioner,Jason Wei
+
+# --- aggregators (high volume — add last, needs dedup) --------------------
+arankomatsuzaki,aggregator,paper firehose
+_akhaliq,aggregator,AK — paper firehose
+
+# --- lab leadership -------------------------------------------------------
+sama,leadership,Sam Altman
+demishassabis,leadership,Demis Hassabis
+ilyasut,leadership,Ilya Sutskever
+markchen90,leadership,Mark Chen
+merettm,leadership,Jakub Pachocki
+polynoamial,leadership,Noam Brown
+ShaneLegg,leadership,Shane Legg
+JeffDean,leadership,Jeff Dean
+OriolVinyalsML,leadership,Oriol Vinyals
+
+# --- widely-followed researchers ------------------------------------------
+karpathy,wellknown,Andrej Karpathy
+ylecun,wellknown,Yann LeCun
+geoffreyhinton,wellknown,Geoffrey Hinton
+AndrewYNg,wellknown,Andrew Ng
+drfeifei,wellknown,Fei-Fei Li
+goodfellow_ian,wellknown,Ian Goodfellow
+hardmaru,wellknown,hardmaru
+
+# --- orgs -----------------------------------------------------------------
+AnthropicAI,org,Anthropic
+OpenAI,org,OpenAI
+MistralAI,org,Mistral AI
+AIatMeta,org,AI at Meta
+
+# --- commentary / critique ------------------------------------------------
+emollick,commentary,Ethan Mollick
+random_walker,commentary,Arvind Narayanan
+sayashk,commentary,Sayash Kapoor
+timnitGebru,commentary,Timnit Gebru
+
+# --- unverified: check by hand before enabling ----------------------------
+# DarioAmodei,leadership,could not confirm — verify manually
+# fchollet,wellknown,could not confirm — verify manually
+# GoogleDeepMind,org,could not confirm — verify manually
+# DanHendrycks,safety,could not confirm — verify manually
+# janleike,safety,Jan Leike
+# jackclarkSF,safety,Jack Clark — Import AI
+
+# --- builders / AI-native product & startups ------------------------------
+danshipper,builder,Dan Shipper — runs an AI-native company
+levelsio,builder,Pieter Levels — ships solo AI products
+paulg,builder,Paul Graham — startup first principles
+
+# --- AI + games / world models --------------------------------------------
+DrJimFan,games,Jim Fan — agents, world models, robotics
+AIandGames,games,systematic game-AI explainers
+ballmatthew,games,Matthew Ball — games industry & platform economics
+
+# --- Chinese-language AI ---------------------------------------------------
+dotey,zh,宝玉 — AI/coding agents explained in Chinese

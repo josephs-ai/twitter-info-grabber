@@ -1,0 +1,22 @@
+# Browser session — contains login cookies. Never commit.
+.browser-profile/
+
+# Spike output: raw intercepted payloads, may contain personal timeline data.
+spike/out/
+debug/
+
+# Data
+*.db
+*.db-wal
+*.db-shm
+digests/
+
+# Secrets
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+venv/
+.venv/
+logs/
