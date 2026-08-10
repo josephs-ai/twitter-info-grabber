@@ -77,7 +77,7 @@ def cmd_doctor(args) -> int:
         print(f"{'OK  ' if has_profile else 'FAIL'} browser profile: {profile}")
         ok &= has_profile
         if not has_profile:
-            print("       -> run: ./tracker login")
+            print("       -> run: ./run login")
 
         s = db.stats(conn)
         print(f"OK   database: {args.db} ({s['posts_total']} posts)")
