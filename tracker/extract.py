@@ -22,7 +22,7 @@ import json
 import anthropic
 
 from . import context, db
-from .judge import MODEL, _content, build_prompt
+from .judge import MODEL, _content, build_prompt, unescape
 
 PROMPT_VERSION = "x1"
 MAX_TOKENS = 8000
@@ -132,6 +132,12 @@ def extract_one(client, conn, post: dict, model: str = MODEL,
         result = json.loads(text)
     except json.JSONDecodeError:
         return {"error": "bad_json"}
+    result["headline"] = unescape(result.get("headline"))
+    result["so_what"] = unescape(result.get("so_what"))
+    result["claims"] = [unescape(c) for c in result.get("claims", [])]
+    for n in result.get("numbers", []):
+        n["value"] = unescape(n.get("value"))
+        n["measures"] = unescape(n.get("measures"))
     result["usage"] = response.usage
     return result
 

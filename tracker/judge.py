@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 
 import anthropic
 
@@ -96,6 +97,21 @@ SCHEMA = {
     "required": ["novelty", "value", "category", "rationale", "verdict"],
     "additionalProperties": False,
 }
+
+
+_ESCAPE_RE = re.compile(r"\\u([0-9a-fA-F]{4})")
+
+
+def unescape(text: str | None) -> str | None:
+    """Decode \\uXXXX sequences that survived JSON parsing.
+
+    A model sometimes emits a double-escaped sequence, so json.loads turns
+    "\\\\u03c3" into the literal characters \\u03c3 rather than the sigma it meant.
+    Left alone that renders as raw escape text in the UI.
+    """
+    if not text:
+        return text
+    return _ESCAPE_RE.sub(lambda m: chr(int(m.group(1), 16)), text)
 
 
 def build_prompt(post: dict, neighbours: list[dict]) -> str:
@@ -199,6 +215,9 @@ def judge_one(client, post: dict, neighbours: list[dict], model: str,
         result = json.loads(text)
     except json.JSONDecodeError:
         return {"error": "bad_json", "usage": response.usage}
+    for key in ("rationale", "category", "verdict"):
+        if isinstance(result.get(key), str):
+            result[key] = unescape(result[key])
     result["usage"] = response.usage
     return result
 
