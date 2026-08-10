@@ -115,7 +115,7 @@ python tests/smoke.py
 
 ## How it works
 
-Nine stages. Cheap deterministic filters first, the model only at the narrow end.
+Ten stages. Cheap deterministic filters first, the model only at the narrow end.
 
 | Stage | What it does |
 |---|---|
@@ -123,6 +123,7 @@ Nine stages. Cheap deterministic filters first, the model only at the narrow end
 | `replies` | Mines conversations under tracked posts. Discovery *and* content: a sharp correction can outrank the post it replies to. |
 | `suggest` | Harvests who tracked accounts follow, ranked by how many of them follow each candidate. |
 | `links` | Resolves URLs, so "great paper: `<link>`" carries signal. arXiv abstracts get a dedicated path. |
+| `curate` | Adds accounts the evidence supports and drops ones with a long record of nothing. See *How it adapts*. |
 | `amplify` | Counts how many tracked accounts independently shared each original. Corroboration you cannot see post-by-post. |
 | `threads` | Stitches self-threads into one unit. A 12-post thread is one idea, not twelve. |
 | `dedup` | Embeds every post twice — lexical and semantic — and takes the max. Near-duplicates drop before any API call. |
@@ -144,28 +145,107 @@ good?" stays a query rather than a guess.
 
 ---
 
-## Teaching it your taste
+## The app
 
-The judge ships with a generic idea of what matters. Yours is specific.
+`./run app` opens a real desktop window — the same Python the CLI uses, so
+there is one implementation of every rule.
+
+![Surfaced](ui/assets/screenshot-surfaced.png)
+
+*What cleared the bar, with the findings extracted: headline, claims, figures
+with units, and why it matters. The original post is collapsed underneath as
+evidence rather than as the story. The slider at the top moves the bar and
+re-filters everything already judged, instantly.*
+
+---
+
+## How it adapts
+
+Three loops, each closing a different gap. All three are visible in the desktop
+app (`./run app`).
+
+### You teach it what you value
+
+The judge ships with a generic idea of what matters. Yours is specific and will
+not survive contact with one.
 
 ```bash
 ./run review --rate     # walk through decisions, rate each
-./run app               # or use the Rate queue view
 ```
 
 Ratings become few-shot examples in the judge's prompt. **Disagreements teach it
 most** — a post it skipped that you rated useful is a correction, and those are
-weighted first. After editing the prompt, bump `PROMPT_VERSION` in
+weighted first. Because the examples sit in the cached prefix they cost almost
+nothing per call. After editing the prompt, bump `PROMPT_VERSION` in
 `tracker/judge.py` and run `./run replay` to see which verdicts changed.
 
+### It curates its own sources
+
+![Self-curation](ui/assets/screenshot-curation.png)
+
+
+```bash
+./run curate            # preview
+./run curate --apply
+./run curate --history  # what it did, and on what evidence
+./run curate --undo
+```
+
+**Promote** — a candidate several tracked accounts follow, or who keeps turning
+up replying under their posts, gets tracked automatically.
+
+**Demote** — an account with a long judged record and nothing surfaced gets
+deactivated. This is the half usually left out and it matters more: a list that
+only grows drifts toward noise, diluting the corpus and giving dedup more
+near-misses to wade through.
+
+Three rails keep it from running away — evidence minimums so nothing acts on a
+thin record, per-run caps so a bad threshold costs three accounts rather than
+fifty, and a grace period so a new account gets time to prove itself. Every
+change is logged with its evidence and is reversible. **Both halves ship off**;
+how much autonomy the roster gets is your call.
+
+### You set the bar, and can move it freely
+
+Five levels from Everything to Severe. The model's novelty and value *scores*
+are a reading of the post and do not change when your taste does — only the bar
+you hold them to changes. So the bar is applied **when results are read**, not
+frozen into the stored verdict.
+
+That is what makes it worth having: moving the slider re-filters every post
+already judged, instantly and for free. No re-judging, no API calls, nothing
+rewritten. The slider shows how many posts each level would surface before you
+commit to it.
+
 ---
+
+## Maintenance
+
+Mostly none — but two things are worth knowing.
+
+**Storage.** Embeddings are about 9KB per post, and dedup only ever looks at a
+rolling window, so vectors outside it are dead weight — roughly 6GB a year if
+left alone. `./run dedup --apply` prunes them automatically. Run `VACUUM` on the
+SQLite file occasionally to reclaim the space on disk.
+
+![Schedule](ui/assets/screenshot-schedule.png)
+
+**Scheduling.** `./run schedule` shows and sets when the pipeline runs, writing
+to cron or Task Scheduler. Entries carry a marker and only marked lines are ever
+touched, so it never disturbs anything else in your crontab.
 
 ## Commands
 
 ```
-run login | collect | replies | suggest | links | amplify | threads
-    dedup | judge | extract | digest | review | rate | replay
-    accounts | candidates | stats | doctor
+collect   replies   suggest   links   amplify   curate   threads
+dedup     judge     extract   digest        the pipeline, in order
+
+daily     run every stage once      app       open the desktop app
+schedule  when it runs by itself    doctor    check session, db, last run
+review    read past judgements      rate      record what you thought
+replay    re-judge under a new prompt         stats     what is in the database
+accounts  who is tracked            candidates  who was discovered
+login     sign in to X
 ```
 
 `./run doctor` when something seems wrong. `./run <cmd> --help` for options.
