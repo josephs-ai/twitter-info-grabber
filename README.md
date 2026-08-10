@@ -160,3 +160,32 @@ seeds.txt    who is tracked — edit this
 
 Everything reads from one SQLite file. Swap the collection layer and nothing
 downstream notices.
+
+---
+
+## Contributing
+
+The parts most likely to need work from someone other than me:
+
+- **Collection breaks when X changes.** If an operation gets renamed, the fix is
+  usually one string in `tracker/parse.py` — `collect` logs every GraphQL
+  operation it sees precisely so this stays a one-liner.
+- **The lexical + semantic embedding pair is a compromise.** It avoids a 2.5GB
+  torch install at some cost in accuracy. `tracker/embed.py` takes any backend
+  exposing `encode()`; a real sentence-transformer would drop straight in.
+- **Only Linux is tested.** pywebview supports macOS and Windows, and nothing
+  else is platform-specific, but nobody has tried it.
+
+Keep the two invariants: **nothing is ever deleted** (dropped posts keep their
+reason so filtering stays auditable), and **cheap filters run before expensive
+ones** so model calls stay at the narrow end of the funnel.
+
+---
+
+## License
+
+[Apache License 2.0](LICENSE). Use it, fork it, ship it — keep the notice.
+
+The license covers this code. It does not grant you rights to the posts it
+collects, and it is not permission to violate X's terms of service; that call is
+yours.
