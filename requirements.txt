@@ -1,0 +1,6 @@
+# Pinned to what this was developed and tested against.
+playwright==1.59.0      # collection: drives a browser, intercepts X's GraphQL
+numpy==2.5.1            # similarity maths for dedup
+model2vec==0.8.2        # semantic embeddings (~30MB, no torch)
+anthropic==0.120.2      # the judge and the extractor
+pywebview==6.2.1        # desktop app window (uses the system WebKit)
