@@ -25,7 +25,7 @@ import re
 
 import anthropic
 
-from . import context, db, feedback, novelty
+from . import context, db, feedback, novelty, strictness
 
 MODEL = "claude-opus-5"
 PROMPT_VERSION = "v2"
@@ -47,7 +47,7 @@ of this? Concrete results, non-obvious technical claims, useful tooling, and \
 specific numbers score high. Vague predictions, hype, engagement bait, \
 self-promotion, and meta-commentary about the AI discourse score low.
 
-Score each 1-5. Recommend surfacing only when novelty >= 3 AND value >= 4.
+Score each 1-5. {BAR}
 
 Be strict. Missing one good post costs far less than a digest the reader stops \
 trusting. But judge the content, not the author's fame: an unknown researcher \
@@ -193,7 +193,10 @@ def judge_one(client, post: dict, neighbours: list[dict], model: str,
         max_tokens=MAX_TOKENS,
         system=[{
             "type": "text",
-            "text": system_text or SYSTEM,
+            "text": system_text or SYSTEM.replace(
+                "{BAR}", strictness.describe_for_prompt(
+                    dict(next(l for l in strictness.LEVELS
+                              if l["key"] == strictness.DEFAULT_KEY)))),
             # Stable prefix, so every call after the first is a cache read at
             # ~10% of input price. The volatile candidate goes in the user turn.
             "cache_control": {"type": "ephemeral"},
@@ -310,7 +313,11 @@ def run(conn, limit: int = 20, model: str = MODEL, effort: str = "medium",
     client = anthropic.Anthropic()
     # Calibration examples live in the cached prefix, so they are nearly free
     # per call and only invalidate the cache when you rate something new.
-    system_text = SYSTEM + feedback.render_examples(conn)
+    level = strictness.load(conn)
+    system_text = (SYSTEM.replace("{BAR}", strictness.describe_for_prompt(level))
+                   + feedback.render_examples(conn))
+    print(f"(bar: {level['label']} — novelty >= {level['novelty']}, "
+          f"value >= {level['value']})")
     fb = feedback.stats(conn)
     if fb["total"]:
         print(f"(using {fb['total']} reader ratings as calibration, "

@@ -25,6 +25,7 @@ from . import extract as extract_mod
 from . import amplify, db, digest, feedback, novelty
 from . import curate as curate_mod
 from . import schedule as schedule_mod
+from . import strictness as strict_mod
 
 ROOT = Path(__file__).resolve().parent.parent
 UI = ROOT / "ui" / "index.html"
@@ -94,7 +95,13 @@ class Api:
                 FROM judgements j JOIN posts p ON p.id = j.post_id
             """
             if mode == "surfaced":
-                sql = base + " WHERE j.verdict='surface' ORDER BY j.value DESC, p.amplifiers DESC"
+                where, params = strict_mod.clause(strict_mod.load(conn))
+                rows = conn.execute(
+                    base + f" WHERE {where} ORDER BY j.value DESC, p.amplifiers DESC LIMIT ?",
+                    (*params, limit)).fetchall()
+                return self._rows_to_items(conn, rows)
+            if mode == "_never":
+                sql = base
             elif mode == "nearmiss":
                 sql = base + (" WHERE j.verdict='skip' AND j.value >= 3 "
                               "ORDER BY j.value DESC, j.novelty DESC")
@@ -194,6 +201,23 @@ class Api:
         conn = self._conn()
         try:
             return curate_mod.undo(conn)
+        finally:
+            conn.close()
+
+    # -- strictness ------------------------------------------------------------
+
+    def strictness_status(self) -> dict:
+        conn = self._conn()
+        try:
+            return {"current": strict_mod.load(conn), "levels": strict_mod.preview(conn)}
+        finally:
+            conn.close()
+
+    def strictness_set(self, key: str) -> dict:
+        conn = self._conn()
+        try:
+            strict_mod.save(conn, key)
+            return {"current": strict_mod.load(conn), "levels": strict_mod.preview(conn)}
         finally:
             conn.close()
 

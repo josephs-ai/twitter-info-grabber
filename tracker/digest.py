@@ -6,7 +6,7 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 
-from . import db, extract
+from . import db, extract, strictness
 
 ROOT = Path(__file__).resolve().parent.parent
 OUT_DIR = ROOT / "digests"
@@ -29,7 +29,8 @@ def gather(conn, since_hours: int, limit: int, min_value: int | None = None) -> 
     near-misses than nothing.
     """
     if min_value is None:
-        where, params = "j.verdict = 'surface'", []
+        # The bar is a preference applied now, not a verdict frozen at judge time.
+        where, params = strictness.clause(strictness.load(conn))
     else:
         where, params = "j.value >= ?", [min_value]
 
