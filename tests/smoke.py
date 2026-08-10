@@ -158,6 +158,50 @@ def test_context(tmp: Path) -> None:
     conn.close()
 
 
+def test_curation(tmp: Path) -> None:
+    print("\ncuration rails")
+    from tracker import curate, db
+
+    conn = db.connect(tmp / "cur.db")
+    old, new = "2026-01-01T00:00:00+00:00", "2026-08-09T00:00:00+00:00"
+
+    def account(handle, added):
+        conn.execute("INSERT INTO accounts (handle, added_at, active) VALUES (?,?,1)",
+                     (handle, added))
+
+    def judged(handle, count, value, surfaced=0):
+        for i in range(count):
+            pid = f"{handle}{i}"
+            conn.execute(
+                "INSERT INTO posts (id, author_handle, author_name, text, created_at,"
+                " fetched_at, is_retweet, capture_source, urls) "
+                "VALUES (?,?,'','t',?,?,0,'timeline','[]')", (pid, handle, old, old))
+            conn.execute(
+                "INSERT INTO judgements (post_id, model, prompt_version, verdict,"
+                " novelty, value, created_at) VALUES (?,'m','v',?,2,?,?)",
+                (pid, "surface" if i < surfaced else "skip", value, old))
+
+    account("noisy", old); judged("noisy", 20, 1)
+    account("good", old); judged("good", 20, 4, surfaced=5)
+    account("thin", old); judged("thin", 3, 1)
+    account("newbie", new); judged("newbie", 20, 1)
+    conn.commit()
+
+    demoted = {a["handle"] for a in curate.run(conn, dry_run=True, force=True)["demoted"]}
+    check("bad long record is demoted", "noisy" in demoted)
+    check("productive account spared", "good" not in demoted)
+    check("thin record spared", "thin" not in demoted)
+    check("account inside grace period spared", "newbie" not in demoted)
+
+    curate.run(conn, dry_run=False, force=True)
+    active = {r["handle"] for r in conn.execute("SELECT handle FROM accounts WHERE active=1")}
+    check("apply deactivates", "noisy" not in active)
+    curate.undo(conn)
+    restored = {r["handle"] for r in conn.execute("SELECT handle FROM accounts WHERE active=1")}
+    check("undo restores", "noisy" in restored)
+    conn.close()
+
+
 def main() -> int:
     print(f"python {sys.version.split()[0]} on {sys.platform}")
     with tempfile.TemporaryDirectory() as td:
@@ -168,6 +212,7 @@ def main() -> int:
         test_dedup()
         test_threads(tmp)
         test_context(tmp)
+        test_curation(tmp)
 
     print(f"\n{PASSED} passed, {len(FAILED)} failed")
     if FAILED:

@@ -23,6 +23,7 @@ import webview
 from . import accounts as accounts_mod
 from . import extract as extract_mod
 from . import amplify, db, digest, feedback, novelty
+from . import curate as curate_mod
 from . import schedule as schedule_mod
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -159,6 +160,40 @@ class Api:
             conn.execute("UPDATE candidates SET status='rejected' WHERE handle=?", (handle,))
             conn.commit()
             return True
+        finally:
+            conn.close()
+
+    # -- self-curation ---------------------------------------------------------
+
+    def curate_status(self) -> dict:
+        conn = self._conn()
+        try:
+            preview = curate_mod.run(conn, dry_run=True, force=True)
+            return {"settings": curate_mod.load(conn),
+                    "promote": preview["promoted"], "demote": preview["demoted"],
+                    "history": curate_mod.history(conn, 12)}
+        finally:
+            conn.close()
+
+    def curate_save(self, settings: dict) -> dict:
+        conn = self._conn()
+        try:
+            return curate_mod.save(conn, settings)
+        finally:
+            conn.close()
+
+    def curate_apply(self) -> dict:
+        conn = self._conn()
+        try:
+            r = curate_mod.run(conn, dry_run=False, force=True)
+            return {"promoted": len(r["promoted"]), "demoted": len(r["demoted"])}
+        finally:
+            conn.close()
+
+    def curate_undo(self) -> int:
+        conn = self._conn()
+        try:
+            return curate_mod.undo(conn)
         finally:
             conn.close()
 

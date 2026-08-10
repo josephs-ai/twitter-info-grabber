@@ -8,6 +8,7 @@ import sys
 from . import accounts as accounts_mod
 from . import amplify as amplify_mod
 from . import collect as collect_mod
+from . import curate as curate_mod
 from . import db
 from . import digest as digest_mod
 from . import extract as extract_mod
@@ -385,6 +386,40 @@ def cmd_schedule(args) -> int:
         conn.close()
 
 
+def cmd_curate(args) -> int:
+    conn = db.connect(args.db)
+    try:
+        if args.undo:
+            print(f"reversed {curate_mod.undo(conn)} automatic changes")
+            return 0
+        if args.history:
+            for h in curate_mod.history(conn):
+                mark = " (undone)" if h["undone"] else ""
+                print(f"  {h['created_at'][:16]}  {h['action']:<8} @{h['handle']:<18} "
+                      f"{h['reason']}{mark}")
+            return 0
+
+        r = curate_mod.run(conn, dry_run=not args.apply, force=args.force)
+        for a in r["promoted"]:
+            print(f"  + track  @{a['handle']:<18} {a['reason']}")
+        for a in r["demoted"]:
+            print(f"  - drop   @{a['handle']:<18} {a['reason']}")
+        if not r["promoted"] and not r["demoted"]:
+            s = r["settings"]
+            print("Nothing meets the bar.")
+            print(f"  promote at: {s['promote_min_follows']} follows "
+                  f"or {s['promote_min_replies']} replies")
+            print(f"  demote at:  {s['demote_min_judged']} judged, none surfaced, "
+                  f"mean value <= {s['demote_max_mean_value']}")
+            if not (r["settings"]["auto_promote"] or r["settings"]["auto_demote"] or args.force):
+                print("  (auto-curation is off — use --force to preview anyway)")
+        elif not args.apply:
+            print("\n(dry run — re-run with --apply)")
+        return 0
+    finally:
+        conn.close()
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(prog="tracker", description="AI signal tracker")
     parser.add_argument("--db", default=str(db.DEFAULT_DB))
@@ -413,6 +448,13 @@ def main(argv=None) -> int:
 
     p = sub.add_parser("app", help="open the desktop app")
     p.set_defaults(func=cmd_app)
+
+    p = sub.add_parser("curate", help="let the tracked list grow and prune itself")
+    p.add_argument("--apply", action="store_true", help="make the changes")
+    p.add_argument("--force", action="store_true", help="preview even when disabled")
+    p.add_argument("--undo", action="store_true", help="reverse recent auto changes")
+    p.add_argument("--history", action="store_true")
+    p.set_defaults(func=cmd_curate)
 
     p = sub.add_parser("schedule", help="show or set when the pipeline runs")
     p.add_argument("--install", action="store_true", help="write it to cron/Task Scheduler")

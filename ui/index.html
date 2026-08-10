@@ -271,6 +271,7 @@ button.act.bad.on  { background: var(--rust); border-color: var(--rust); color: 
     <button data-v="candidates">Candidates</button>
     <button data-v="pipeline">Pipeline</button>
   <button data-v="schedule">Schedule</button>
+  <button data-v="curate">Self-curation</button>
   </div>
   <div class="assay" id="assay"></div>
 </nav>
@@ -502,6 +503,84 @@ async function saveSchedule(enable) {
   render();
 }
 
+
+/* ---- self-curation ------------------------------------------------------ */
+let CUR = null;
+
+async function renderCurate(main) {
+  const st = await api().curate_status();
+  CUR = JSON.parse(JSON.stringify(st.settings));
+
+  main.innerHTML = `
+    <h1>Self-curation</h1>
+    <p class="lede">The tracked list can manage itself: add accounts the evidence
+    supports, drop ones that have earned a long record of nothing. Every change is
+    logged and reversible.</p>
+
+    <div class="banner">
+      <b>Pruning matters more than adding.</b> A list that only grows drifts toward
+      noise — each marginal account dilutes the corpus and gives dedup more
+      near-misses to wade through.
+    </div>
+
+    <div class="field">
+      <label>Add accounts automatically</label>
+      <div class="hint">Promote a candidate once enough tracked accounts follow them,
+      or they keep turning up in replies under tracked posts.</div>
+      <div class="choices">
+        <div class="choice ${CUR.auto_promote ? 'on' : ''}" onclick="curToggle('auto_promote')">
+          <b>${CUR.auto_promote ? 'On' : 'Off'}</b>
+          <span>max ${CUR.promote_max_per_run} per run</span></div>
+        <div class="choice" onclick="curBump('promote_min_follows',1)">
+          <b>${CUR.promote_min_follows} follows</b><span>threshold · click to raise</span></div>
+        <div class="choice" onclick="curBump('promote_min_replies',1)">
+          <b>${CUR.promote_min_replies} replies</b><span>threshold · click to raise</span></div>
+      </div>
+      ${st.promote.length ? `<div class="cmd">would add now: ${
+        st.promote.map(a => '@' + esc(a.handle) + ' (' + esc(a.reason) + ')').join(' · ')}</div>` : ''}
+    </div>
+
+    <div class="field">
+      <label>Drop accounts automatically</label>
+      <div class="hint">Deactivate an account only after a long judged record with
+      nothing surfaced. New accounts get ${CUR.demote_grace_days} days before they
+      can be considered.</div>
+      <div class="choices">
+        <div class="choice ${CUR.auto_demote ? 'on' : ''}" onclick="curToggle('auto_demote')">
+          <b>${CUR.auto_demote ? 'On' : 'Off'}</b>
+          <span>max ${CUR.demote_max_per_run} per run</span></div>
+        <div class="choice" onclick="curBump('demote_min_judged',5)">
+          <b>${CUR.demote_min_judged} judged</b><span>evidence needed · click to raise</span></div>
+      </div>
+      ${st.demote.length ? `<div class="cmd">would drop now: ${
+        st.demote.map(a => '@' + esc(a.handle) + ' (' + esc(a.reason) + ')').join(' · ')}</div>`
+        : `<div class="cmd">nothing qualifies for dropping</div>`}
+    </div>
+
+    <div class="row">
+      <button class="act" onclick="curSave()">Save settings</button>
+      <button class="act" onclick="curApply()">Apply now</button>
+      ${st.history.length ? `<button class="act" onclick="curUndo()">Undo last changes</button>` : ''}
+    </div>
+
+    ${st.history.length ? `<div class="field" style="margin-top:26px">
+      <label>What it has done</label>
+      ${st.history.map(h => `<div class="cmd" style="margin-top:6px">
+        ${h.created_at.slice(0,16)} · ${h.action} @${esc(h.handle)} — ${esc(h.reason)}
+        ${h.undone ? ' (undone)' : ''}</div>`).join('')}
+    </div>` : ''}`;
+}
+
+function curToggle(k) { CUR[k] = !CUR[k]; api().curate_save(CUR).then(() => render()); }
+function curBump(k, step) {
+  CUR[k] = CUR[k] + step;
+  if (CUR[k] > 20) CUR[k] = 1;          // wrap rather than climb forever
+  api().curate_save(CUR).then(() => render());
+}
+async function curSave() { await api().curate_save(CUR); render(); }
+async function curApply() { await api().curate_apply(); render(); }
+async function curUndo()  { await api().curate_undo();  render(); }
+
 async function render() {
   const main = document.getElementById('main');
   main.innerHTML = '<div class="empty">reading database…</div>';
@@ -553,6 +632,7 @@ async function render() {
   }
 
   if (view === 'schedule') { return renderSchedule(main); }
+  if (view === 'curate') { return renderCurate(main); }
 
   if (view === 'pipeline') {
     main.innerHTML = `<div class="wide"><h1>Pipeline</h1>

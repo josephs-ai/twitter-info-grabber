@@ -47,7 +47,7 @@ def load_env() -> None:
 
 
 def run(conn, skip: set[str] | None = None) -> int:
-    from . import amplify, collect, digest, extract, judge, links, novelty
+    from . import amplify, collect, curate, digest, extract, judge, links, novelty
     from . import replies, suggest, threads
 
     load_env()
@@ -62,6 +62,9 @@ def run(conn, skip: set[str] | None = None) -> int:
         ("replies",  lambda: replies.mine(conn, limit=4, scrolls=3)),
         ("suggest",  lambda: suggest.harvest(conn, limit_seeds=2, scrolls=5)),
         ("links",    lambda: links.resolve(conn, limit=40)),
+        # After discovery (so there are candidates to weigh) and before judging
+        # (so a newly tracked account's posts are scored this run).
+        ("curate",   lambda: curate.run(conn, dry_run=False)),
         ("amplify",  lambda: (amplify.backfill_retweet_targets(conn),
                               amplify.recompute(conn), amplify.promote(conn))),
         ("threads",  lambda: threads.apply(conn, dry_run=False)),
