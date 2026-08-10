@@ -13,7 +13,9 @@ from __future__ import annotations
 
 import json
 import subprocess
+import sys
 import threading
+import webbrowser
 from pathlib import Path
 
 import webview
@@ -184,7 +186,7 @@ class Api:
         def worker():
             try:
                 proc = subprocess.run(
-                    [str(ROOT / "run"), stage, *commands[stage]],
+                    [sys.executable, "-m", "tracker", stage, *commands[stage]],
                     capture_output=True, text=True, timeout=3600, cwd=str(ROOT))
                 tail = (proc.stdout or proc.stderr or "").strip().splitlines()[-6:]
                 payload = {"stage": stage, "ok": proc.returncode == 0,
@@ -202,9 +204,12 @@ class Api:
         return {"ok": True, "started": stage}
 
     def open_external(self, url: str) -> bool:
-        """Open a post in the real browser, not inside the app window."""
-        subprocess.Popen(["xdg-open", url], stdout=subprocess.DEVNULL,
-                         stderr=subprocess.DEVNULL)
+        """Open a post in the real browser, not inside the app window.
+
+        webbrowser is stdlib and already knows the right incantation on each
+        platform — xdg-open, `open`, or ShellExecute.
+        """
+        webbrowser.open(url)
         return True
 
 

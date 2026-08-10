@@ -4,3 +4,12 @@ numpy==2.5.1            # similarity maths for dedup
 model2vec==0.8.2        # semantic embeddings (~30MB, no torch)
 anthropic==0.120.2      # the judge and the extractor
 pywebview==6.2.1        # desktop app window (uses the system WebKit)
+
+# pywebview needs a native GUI backend per platform.
+#   Linux   uses the system WebKit2GTK + PyGObject (system packages, not PyPI)
+#   macOS   uses Cocoa via pyobjc
+#   Windows uses WebView2 via pythonnet
+pyobjc-core>=10.0; sys_platform == "darwin"
+pyobjc-framework-Cocoa>=10.0; sys_platform == "darwin"
+pyobjc-framework-WebKit>=10.0; sys_platform == "darwin"
+pythonnet>=3.0; sys_platform == "win32"

@@ -44,28 +44,60 @@ machinery. Expect to edit `seeds.txt` and tune the judge to your taste.
 
 ## Setup
 
-Linux with a desktop session. Python 3.11+.
+Python 3.11+. A desktop session is needed for the app and for signing in.
 
 ```bash
 git clone https://github.com/josephs-ai/twitter-info-grabber.git
 cd twitter-info-grabber
-./setup.sh
+python3 bootstrap.py          # any platform
 ```
 
-Then put your key in `.env`, and sign in to your burner account:
+Then add your key to `.env` and sign in to a burner account:
 
-```bash
-./run login          # opens a browser; log in, press Enter, nothing else
-./run collect --all  # first pass, ~25 min across 54 accounts
-./daily.sh           # the whole pipeline end to end
-./app                # desktop app
+| | Linux / macOS | Windows |
+|---|---|---|
+| sign in | `./run login` | `run.cmd login` |
+| first collection | `./run collect --all` | `run.cmd collect --all` |
+| full pipeline | `./run daily` | `run.cmd daily` |
+| desktop app | `./run app` | `run.cmd app` |
+
+`./run` and `run.cmd` are thin wrappers around `python -m tracker`, which works
+directly if you prefer.
+
+### Scheduling
+
+`daily` is idempotent, so run it as often as you like. Three times a day is
+plenty.
+
+**Linux / macOS** — `crontab -e`:
+
+```
+0 7,13,19 * * * /full/path/to/twitter-info-grabber/run daily >> /full/path/to/logs/daily.log 2>&1
 ```
 
-`daily.sh` is safe to re-run and safe to schedule:
+Use absolute paths; cron does not run from your project directory.
 
+**Windows** — Task Scheduler, or from PowerShell:
+
+```powershell
+schtasks /create /tn "AI Signal" /tr "C:\path\to\run.cmd daily" /sc daily /st 07:00
 ```
-0 7,13,19 * * * /path/to/twitter-info-grabber/daily.sh >> /path/to/logs/daily.log 2>&1
-```
+
+### Platform notes
+
+Developed and tested on **Linux (Ubuntu/GNOME, Wayland)**. The code has no
+Linux-only calls — paths go through `pathlib`, links open via `webbrowser`, and
+the pipeline is pure Python — but **macOS and Windows are untested**. If you hit
+something, it is likely in one of these:
+
+- **The desktop app's GUI backend.** pywebview uses WebKit2GTK on Linux, Cocoa
+  on macOS, and WebView2 on Windows. The macOS and Windows dependencies install
+  from PyPI automatically; Linux needs system packages
+  (`gir1.2-webkit2-4.1`, `python3-gi`) that pip cannot provide.
+- **Everything else is portable.** Collection, dedup, judging and extraction are
+  Python plus SQLite plus a headless browser.
+
+Reports from either platform are welcome — see Contributing.
 
 ---
 
@@ -106,7 +138,7 @@ The judge ships with a generic idea of what matters. Yours is specific.
 
 ```bash
 ./run review --rate     # walk through decisions, rate each
-./app                   # or use the Rate queue view
+./run app               # or use the Rate queue view
 ```
 
 Ratings become few-shot examples in the judge's prompt. **Disagreements teach it

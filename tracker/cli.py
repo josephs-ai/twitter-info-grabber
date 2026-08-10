@@ -15,6 +15,7 @@ from . import feedback as feedback_mod
 from . import judge as judge_mod
 from . import links as links_mod
 from . import novelty as novelty_mod
+from . import pipeline as pipeline_mod
 from . import replies as replies_mod
 from . import suggest as suggest_mod
 from . import threads as threads_mod
@@ -345,6 +346,19 @@ def cmd_extract(args) -> int:
         conn.close()
 
 
+def cmd_daily(args) -> int:
+    conn = db.connect(args.db)
+    try:
+        return pipeline_mod.run(conn, skip=set(args.skip or []))
+    finally:
+        conn.close()
+
+
+def cmd_app(args) -> int:
+    from .app import main as app_main
+    return app_main()
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(prog="tracker", description="AI signal tracker")
     parser.add_argument("--db", default=str(db.DEFAULT_DB))
@@ -365,6 +379,14 @@ def main(argv=None) -> int:
     p.add_argument("--headless", action="store_true")
     p.add_argument("--no-jitter", action="store_true", help="disable human-like delays")
     p.set_defaults(func=cmd_collect)
+
+    p = sub.add_parser("daily", help="run the whole pipeline once (cross-platform)")
+    p.add_argument("--skip", nargs="+", metavar="STAGE",
+                   help="stage names to skip this run")
+    p.set_defaults(func=cmd_daily)
+
+    p = sub.add_parser("app", help="open the desktop app")
+    p.set_defaults(func=cmd_app)
 
     p = sub.add_parser("stats", help="what is in the database")
     p.set_defaults(func=cmd_stats)
