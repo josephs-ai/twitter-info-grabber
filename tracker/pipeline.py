@@ -29,21 +29,9 @@ def log(message: str) -> None:
     print(f"[{_stamp()}] {message}", flush=True)
 
 
-def load_env() -> None:
-    """Read .env, because a scheduler gives the process a bare environment.
-
-    Nothing fancy: KEY=value, ignore blanks and comments, never overwrite a
-    variable that is already set.
-    """
-    path = paths.data_dir() / ".env"
-    if not path.exists():
-        return
-    for line in path.read_text().splitlines():
-        line = line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, _, value = line.partition("=")
-        os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
+# A scheduler gives the process a bare environment, so .env matters most here —
+# but it is loaded for every entry point now, at package import.
+load_env = paths.load_env
 
 
 def run(conn, skip: set[str] | None = None) -> int:

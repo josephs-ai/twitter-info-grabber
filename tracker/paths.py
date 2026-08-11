@@ -58,6 +58,28 @@ def data_dir() -> Path:
     return path
 
 
+def load_env() -> None:
+    """Read .env into the environment, for every entry point.
+
+    This used to live in the pipeline, so `./run daily` and the app saw .env
+    and `./run dedup` did not. Settings put there worked or silently did
+    nothing depending on which command you typed — AI_SIGNAL_EMBED was set
+    correctly, ignored, and the corpus was re-embedded with the wrong model.
+
+    Never overwrites a variable already set: an explicit `FOO=x ./run ...`
+    still wins.
+    """
+    path = data_dir() / ".env"
+    if not path.exists():
+        return
+    for line in path.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
+
+
 def self_command() -> list[str]:
     """How to invoke this program's CLI as a subprocess.
 

@@ -784,6 +784,26 @@ def test_paths() -> None:
     check("source checkout keeps code and data together",
           paths.code_dir() == paths.data_dir())
     check("the schema ships with the code", (paths.code_dir() / "schema.sql").exists())
+    # .env used to be read only by the pipeline, so `./run daily` saw it and
+    # `./run dedup` did not — AI_SIGNAL_EMBED was set correctly, ignored, and
+    # the corpus was re-embedded with the wrong model.
+    import tempfile as _tf2
+    with _tf2.TemporaryDirectory() as td:
+        (Path(td) / ".env").write_text(
+            "# a comment\nAI_SIGNAL_TEST_A=from_file\nAI_SIGNAL_TEST_B=ignored\n\n")
+        os.environ["AI_SIGNAL_HOME"] = td
+        os.environ["AI_SIGNAL_TEST_B"] = "already_set"
+        os.environ.pop("AI_SIGNAL_TEST_A", None)
+        try:
+            paths.load_env()
+            check("a setting in .env reaches the environment",
+                  os.environ.get("AI_SIGNAL_TEST_A") == "from_file")
+            check("an explicit variable still wins",
+                  os.environ.get("AI_SIGNAL_TEST_B") == "already_set")
+        finally:
+            for key in ("AI_SIGNAL_HOME", "AI_SIGNAL_TEST_A", "AI_SIGNAL_TEST_B"):
+                os.environ.pop(key, None)
+
     check("self_command targets this interpreter",
           paths.self_command()[:1] == [sys.executable])
     check("source builds invoke the module", "-m" in paths.self_command())
