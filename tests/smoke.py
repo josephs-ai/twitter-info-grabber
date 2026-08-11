@@ -213,6 +213,34 @@ def test_cn_parsers() -> None:
     check("the URL points at the post",
           posts and posts[0]["url"].endswith("/1402400261/PabcDEfgh"))
 
+    # The mobile API returns bid + text where the desktop one returns
+    # mblogid + text_raw. Requiring the desktop fields rejected every mobile
+    # post while the endpoint itself was being read correctly.
+    mobile = {"data": {"cards": [{"mblog": {
+        "id": "5330489483203816", "bid": "RcNaAdrss",
+        "text": "<a>#大模型#</a> 新模型发布，推理速度提升三倍。",
+        "created_at": "Mon Aug 10 22:13:11 +0800 2026",
+        "user": {"id": 1234, "screen_name": "量子位"}}}]}}
+    mob = cn.walk_weibo(mobile)
+    check("the mobile shape parses too", len(mob) == 1, f"({len(mob)})")
+    check("its bid becomes the id", mob and mob[0]["id"] == "weibo:RcNaAdrss")
+    check("and the URL uses the numeric uid",
+          mob and mob[0]["url"] == "https://weibo.com/1234/RcNaAdrss")
+
+    # Relative dates default to now(), which admission control would read as
+    # "fresh when collected" — the exact posts it exists to hold back.
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc)
+    def hours_ago(text):
+        stamp = datetime.fromisoformat(cn._weibo_time(text))
+        return (now - stamp).total_seconds() / 3600
+    check("'3小时前' is three hours ago", 2.5 < hours_ago("3小时前") < 3.5,
+          f"({hours_ago('3小时前'):.1f}h)")
+    check("'25分钟前' is not now", 0.2 < hours_ago("25分钟前") < 0.7)
+    check("'昨天 12:30' is yesterday", 12 < hours_ago("昨天 12:30") < 48,
+          f"({hours_ago('昨天 12:30'):.0f}h)")
+    check("an unparseable date is not dated in the future", hours_ago("???") >= -0.1)
+
     nested = {"data": {"list": [{
         "idstr": "2", "mblogid": "outer", "text_raw": "说得好",
         "created_at": "Mon Aug 10 12:00:00 +0800 2026",

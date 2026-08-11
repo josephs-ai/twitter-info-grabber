@@ -30,7 +30,7 @@ from __future__ import annotations
 
 import json
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from .. import paths
 from ..collect import goto_with_retry, log
@@ -63,15 +63,52 @@ def _clean(text: str | None) -> str:
     return " ".join(_TAG_RE.sub(" ", text).split())
 
 
+_REL_MIN = re.compile(r"(\d+)\s*分钟前")
+_REL_HOUR = re.compile(r"(\d+)\s*小时前")
+_YESTERDAY = re.compile(r"昨天\s*(\d{1,2}):(\d{2})")
+_MONTH_DAY = re.compile(r"^(\d{1,2})-(\d{1,2})")
+
+
 def _weibo_time(value: str | None) -> str:
-    """Weibo returns C-locale timestamps: 'Mon Aug 10 12:00:00 +0800 2026'."""
+    """Weibo dates a post two ways, and only one of them is a date.
+
+    The desktop API gives 'Mon Aug 10 12:00:00 +0800 2026'. The mobile API
+    gives '刚刚', '25分钟前', '昨天 12:30' or '08-10' for anything recent.
+    Falling back to now() on all of those would date every old post to this
+    minute, which admission control reads as "fresh when collected" — exactly
+    the posts it exists to hold back.
+    """
     if not value:
         return datetime.now(timezone.utc).isoformat()
+    value = value.strip()
     try:
         return datetime.strptime(value, "%a %b %d %H:%M:%S %z %Y") \
             .astimezone(timezone.utc).isoformat()
     except ValueError:
-        return datetime.now(timezone.utc).isoformat()
+        pass
+
+    # Weibo renders these in Beijing time; anchor the arithmetic there.
+    now = datetime.now(timezone(timedelta(hours=8)))
+    if "刚刚" in value:
+        stamp = now
+    elif (m := _REL_MIN.search(value)):
+        stamp = now - timedelta(minutes=int(m.group(1)))
+    elif (m := _REL_HOUR.search(value)):
+        stamp = now - timedelta(hours=int(m.group(1)))
+    elif (m := _YESTERDAY.search(value)):
+        stamp = (now - timedelta(days=1)).replace(
+            hour=int(m.group(1)), minute=int(m.group(2)), second=0, microsecond=0)
+    elif (m := _MONTH_DAY.match(value)):
+        month, day = int(m.group(1)), int(m.group(2))
+        year = now.year - (1 if month > now.month else 0)
+        try:
+            stamp = now.replace(year=year, month=month, day=day,
+                                hour=12, minute=0, second=0, microsecond=0)
+        except ValueError:
+            stamp = now
+    else:
+        stamp = now
+    return stamp.astimezone(timezone.utc).isoformat()
 
 
 def walk_weibo(payload) -> list[dict]:
@@ -84,7 +121,13 @@ def walk_weibo(payload) -> list[dict]:
 
     def visit(node):
         if isinstance(node, dict):
-            if node.get("mblogid") or (node.get("idstr") and "text_raw" in node):
+            # Two shapes, one object. The desktop API returns mblogid +
+            # text_raw; the mobile API returns bid + text and neither of the
+            # other two, so requiring the desktop fields rejected every mobile
+            # post while the endpoint was being read correctly.
+            ident = node.get("mblogid") or node.get("bid") or node.get("idstr")
+            has_body = "text_raw" in node or "text" in node
+            if ident and has_body:
                 user = node.get("user") or {}
                 text = _clean(node.get("text_raw") or node.get("text"))
                 # A repost carries the original nested; keep both, as with X.
@@ -92,8 +135,8 @@ def walk_weibo(payload) -> list[dict]:
                 if retweet:
                     visit(retweet)
                     text = f"{text}\n\n转发：{_clean(retweet.get('text_raw') or retweet.get('text'))}"
-                ident = node.get("mblogid") or node.get("idstr")
-                if text and ident:
+                if text:
+                    uid = user.get("idstr") or user.get("id") or ""
                     found.append({
                         "id": f"weibo:{ident}",
                         "author_handle": str(user.get("screen_name") or "weibo")[:80],
@@ -101,7 +144,7 @@ def walk_weibo(payload) -> list[dict]:
                         "text": text,
                         "created_at": _weibo_time(node.get("created_at")),
                         "platform": "weibo",
-                        "url": f"https://weibo.com/{user.get('idstr','')}/{ident}",
+                        "url": f"https://weibo.com/{uid}/{ident}",
                     })
             for value in node.values():
                 visit(value)
@@ -157,7 +200,7 @@ def _xhs_time(value) -> str:
 
 
 def _harvest(urls, profile_dir, endpoints, walker, headless=True,
-             scrolls=3, pause=2500) -> list[dict]:
+             scrolls=3, pause=2500, mobile=False) -> list[dict]:
     """Open each URL, scroll, and keep whatever the page fetched for itself."""
     from playwright.sync_api import sync_playwright
 
@@ -170,7 +213,9 @@ def _harvest(urls, profile_dir, endpoints, walker, headless=True,
     with sync_playwright() as p:
         context = p.chromium.launch_persistent_context(
             user_data_dir=str(profile_dir), headless=headless,
-            viewport={"width": 1280, "height": 900})
+            locale="zh-CN",
+            **({"user_agent": MOBILE_UA, "viewport": {"width": 420, "height": 900}}
+               if mobile else {"viewport": {"width": 1280, "height": 900}}))
         page = context.pages[0] if context.pages else context.new_page()
 
         rejected = []
@@ -335,13 +380,26 @@ def _targets(conn, platform: str) -> list[str]:
     return [r["handle"].split(":", 1)[1] for r in rows]
 
 
-def fetch_weibo(conn, limit: int = 40, headless: bool = True) -> list[dict]:
-    uids = _targets(conn, "weibo")
-    if not uids:
-        return []
-    urls = [f"https://weibo.com/u/{uid}" for uid in uids]
+WEIBO_KEYWORDS = ["大模型", "开源模型", "AI Agent", "具身智能"]
+
+# The mobile site serves the same posts as plain JSON with far less JavaScript,
+# and — unlike the desktop site — returns search results without a login. It is
+# the better target on every axis except that it needs a phone user-agent.
+MOBILE_UA = ("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) "
+             "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 "
+             "Mobile/15E148 Safari/604.1")
+
+
+def fetch_weibo(conn, limit: int = 40, headless: bool = True,
+                keywords: list[str] | None = None) -> list[dict]:
+    import urllib.parse
+
+    urls = [f"https://m.weibo.cn/u/{uid}" for uid in _targets(conn, "weibo")]
+    for keyword in (keywords or WEIBO_KEYWORDS):
+        query = urllib.parse.quote(f"type=1&q={keyword}", safe="")
+        urls.append(f"https://m.weibo.cn/search?containerid=100103{query}")
     return _harvest(urls, WEIBO_PROFILE, WEIBO_ENDPOINTS, walk_weibo,
-                    headless=headless)[:limit]
+                    headless=headless, mobile=True)[:limit]
 
 
 # Verified against the live site: the personalised home feed of a fresh account
