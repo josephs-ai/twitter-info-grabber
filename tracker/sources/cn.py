@@ -202,16 +202,44 @@ def _harvest(urls, profile_dir, endpoints, walker, headless=True,
     return list(seen.values())
 
 
+def _xhs_signed_in(url: str, payload) -> bool:
+    """Xiaohongshu's own answer to "am I logged in?"."""
+    if "/api/sns/web/v2/user/me" not in url:
+        return False
+    data = payload.get("data") if isinstance(payload, dict) else None
+    return bool(payload.get("success") and isinstance(data, dict)
+                and (data.get("user_id") or data.get("nickname")))
+
+
+def _weibo_signed_in(url: str, payload) -> bool:
+    if "/ajax/setting/getConfig" not in url and "/ajax/profile/info" not in url:
+        return False
+    data = payload.get("data") if isinstance(payload, dict) else None
+    return bool(isinstance(data, dict) and (data.get("uid") or data.get("user")))
+
+
 def login_weibo() -> int:
-    return _login(WEIBO_PROFILE, "https://weibo.com/login.php", "SUB")
+    return _login(WEIBO_PROFILE, "https://weibo.com/login.php", _weibo_signed_in)
 
 
 def login_xhs() -> int:
-    return _login(XHS_PROFILE, "https://www.xiaohongshu.com/explore", "web_session")
+    # The explore page does not offer a sign-in form until you ask for one;
+    # this URL opens the login flow directly.
+    return _login(XHS_PROFILE, "https://www.xiaohongshu.com/login", _xhs_signed_in)
 
 
-def _login(profile_dir, url: str, cookie_name: str, timeout_s: int = 600) -> int:
-    """Same contract as the X login: watch for the session cookie, no stdin."""
+def _login(profile_dir, url: str, verify, timeout_s: int = 900) -> int:
+    """Wait for the service to confirm the session, not for a cookie to appear.
+
+    The first version watched for a named cookie and closed as soon as it saw
+    one. Xiaohongshu sets its session cookie for anonymous visitors too, so it
+    fired instantly, reported "Session saved" and shut the window before anyone
+    could type anything. A cookie says a request happened; only the service can
+    say who you are.
+
+    So the signal is the service's own reply to its own "who am I" call, and
+    the window stays open until it arrives or you close it.
+    """
     import time
 
     from playwright.sync_api import sync_playwright
@@ -220,34 +248,49 @@ def _login(profile_dir, url: str, cookie_name: str, timeout_s: int = 600) -> int
     if not ensure_browser():
         return 1
 
-    log(f"Opening {url} with profile {profile_dir}")
-    log("Sign in. This closes itself once the session cookie appears.")
+    log(f"Opening {url}")
+    log("Sign in — QR from the phone app is usually quickest.")
+    log("The window stays open until the service confirms it. Close it to give up.")
     profile_dir.mkdir(parents=True, exist_ok=True)
     deadline = time.time() + timeout_s
-    ok = False
+    confirmed = {"ok": False}
+
     with sync_playwright() as p:
         context = p.chromium.launch_persistent_context(
             user_data_dir=str(profile_dir), headless=False,
-            viewport={"width": 1280, "height": 900})
+            viewport={"width": 1280, "height": 900}, locale="zh-CN")
         page = context.pages[0] if context.pages else context.new_page()
+
+        def on_response(response):
+            try:
+                payload = response.json()
+            except Exception:
+                return
+            if verify(response.url, payload):
+                confirmed["ok"] = True
+
+        page.on("response", on_response)
         try:
             goto_with_retry(page, url)
         except RuntimeError as exc:
-            log(f"WARNING: {exc}")
-        while time.time() < deadline:
+            log(f"WARNING: {exc} — navigate there manually in the window.")
+
+        while time.time() < deadline and not confirmed["ok"]:
             try:
-                if any(c.get("name") == cookie_name for c in context.cookies()):
-                    ok = True
-                    break
-                page.wait_for_timeout(3000)
-            except Exception:
+                page.wait_for_timeout(2000)
+            except Exception:      # the user closed the window
                 break
         try:
             context.close()
         except Exception:
             pass
-    log("Session saved." if ok else "Session NOT saved — sign in again.")
-    return 0 if ok else 1
+
+    if confirmed["ok"]:
+        log("Signed in — the service confirmed it. Session saved.")
+        return 0
+    log("NOT signed in: the service never confirmed a session.")
+    log("Nothing was saved. Run this again and complete the sign-in.")
+    return 1
 
 
 def _targets(conn, platform: str) -> list[str]:

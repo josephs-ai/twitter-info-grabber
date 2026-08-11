@@ -251,6 +251,21 @@ def test_cn_parsers() -> None:
     check("and their text survives the signal guard",
           embed.has_signal(posts[0]["text"]) and embed.has_signal(note["text"]))
 
+    # Login detection watched for a cookie that Xiaohongshu sets for anonymous
+    # visitors too, so it reported success and closed the window instantly.
+    logged_out = {"success": False, "msg": "无登录信息，或登录信息为空", "data": {}}
+    logged_in = {"success": True, "data": {"user_id": "abc", "nickname": "小明"}}
+    me = "https://edith.xiaohongshu.com/api/sns/web/v2/user/me"
+    check("a rejected session is not a login", not cn._xhs_signed_in(me, logged_out))
+    check("a confirmed session is", cn._xhs_signed_in(me, logged_in))
+    check("an unrelated endpoint proves nothing",
+          not cn._xhs_signed_in("https://x/api/sns/web/v1/homefeed", logged_in))
+    check("weibo needs a uid, not a cookie",
+          cn._weibo_signed_in("https://weibo.com/ajax/setting/getConfig",
+                              {"data": {"uid": "123"}})
+          and not cn._weibo_signed_in("https://weibo.com/ajax/setting/getConfig",
+                                      {"data": {}}))
+
 
 def test_threads(tmp: Path) -> None:
     print("\nthread stitching")
