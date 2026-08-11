@@ -62,6 +62,7 @@ def run(conn, skip: set[str] | None = None) -> int:
     settings = schedule.load(conn)
     judge_limit = int(settings.get("judge_limit", 60))
     scrolls = int(settings.get("collect_scrolls", 5))
+    admit_age = int(settings.get("admit_max_age_days", 3))
     log(f"collect scrolls={scrolls}, judge limit={judge_limit}")
 
     stages: list[tuple[str, callable]] = [
@@ -81,7 +82,8 @@ def run(conn, skip: set[str] | None = None) -> int:
         ("threads",  lambda: threads.apply(conn, dry_run=False)),
         ("dedup",    lambda: (novelty.embed_pending(conn),
                               novelty.scan(conn, apply=True))),
-        ("judge",    lambda: judge.run(conn, limit=judge_limit)),
+        ("judge",    lambda: judge.run(conn, limit=judge_limit,
+                                        admit_max_age_days=admit_age)),
         # Extraction only runs on what cleared the bar, so it scales with the
         # judging rate rather than being a fixed number.
         ("extract",  lambda: extract.run(conn, limit=max(15, judge_limit // 4))),

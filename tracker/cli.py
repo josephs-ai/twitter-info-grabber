@@ -28,6 +28,9 @@ from . import threads as threads_mod
 
 
 def cmd_login(args) -> int:
+    if args.service in ("weibo", "xhs"):
+        from .sources import cn
+        return cn.login_weibo() if args.service == "weibo" else cn.login_xhs()
     if args.wait:
         return collect_mod.login_wait()
     return collect_mod.login(headless=args.headless)
@@ -97,6 +100,17 @@ def cmd_doctor(args) -> int:
 def cmd_accounts(args) -> int:
     conn = db.connect(args.db)
     try:
+        if args.add:
+            # Namespaced, because a Weibo UID and an X handle are different
+            # kinds of identifier and the collectors must not confuse them.
+            handle = args.add if ":" in args.add else args.add.lstrip("@")
+            conn.execute(
+                "INSERT INTO accounts (handle, added_at, category, note, active) "
+                "VALUES (?,?,?,?,1) ON CONFLICT(handle) DO UPDATE SET active=1",
+                (handle, db.now(), args.category, args.note))
+            conn.commit()
+            print(f"tracking {handle}")
+            return 0
         if args.action == "import":
             total, added = accounts_mod.import_seeds(conn)
             print(f"{total} in seeds.txt, {added} newly added")
@@ -198,7 +212,8 @@ def cmd_judge(args) -> int:
     try:
         return judge_mod.run(conn, limit=args.limit, model=args.model,
                              effort=args.effort, k=args.neighbours,
-                             dry_run=args.dry_run)
+                             dry_run=args.dry_run, backfill=args.backfill,
+                             admit_max_age_days=args.admit_age)
     finally:
         conn.close()
 
@@ -503,6 +518,8 @@ def main(argv=None) -> int:
 
     p = sub.add_parser("login", help="interactive login; saves the browser session")
     p.add_argument("--headless", action="store_true")
+    p.add_argument("--service", choices=["x", "weibo", "xhs"], default="x",
+                   help="which service to sign in to (each has its own profile)")
     p.add_argument("--wait", action="store_true",
                    help="detect sign-in from the browser instead of asking here "
                         "(used by the app, which has no terminal)")
@@ -549,7 +566,12 @@ def main(argv=None) -> int:
     p.set_defaults(func=cmd_doctor)
 
     p = sub.add_parser("accounts", help="manage tracked accounts")
-    p.add_argument("action", choices=["import", "list"])
+    p.add_argument("action", choices=["import", "list"], nargs="?", default="list")
+    p.add_argument("--add", metavar="HANDLE",
+                   help="track one account. Prefix for other services: "
+                        "weibo:<uid>, xhs:<user-id>")
+    p.add_argument("--category", default="manual")
+    p.add_argument("--note")
     p.set_defaults(func=cmd_accounts)
 
     p = sub.add_parser("suggest", help="harvest who tracked accounts follow")
@@ -591,6 +613,11 @@ def main(argv=None) -> int:
     p.add_argument("--neighbours", type=int, default=5)
     p.add_argument("--dry-run", action="store_true",
                    help="show the prompt and count, make no API calls")
+    p.add_argument("--backfill", action="store_true",
+                   help="judge posts held back as already-old-when-collected")
+    p.add_argument("--admit-age", type=int, default=judge_mod.ADMIT_MAX_AGE_DAYS,
+                   metavar="DAYS",
+                   help="how old a post may be when collected and still be judged")
     p.set_defaults(func=cmd_judge)
 
     p = sub.add_parser("replay", help="re-judge posts under a new prompt version")

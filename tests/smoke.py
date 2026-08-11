@@ -189,6 +189,69 @@ def test_sources(tmp: Path) -> None:
     conn.close()
 
 
+def test_cn_parsers() -> None:
+    print("\nweibo and xiaohongshu payloads")
+    from tracker.sources import cn
+
+    # Shapes taken from the documented response envelopes. The walk is
+    # recursive precisely so the envelope can move without breaking this.
+    weibo = {"data": {"list": [{
+        "idstr": "5100000000000001",
+        "mblogid": "PabcDEfgh",
+        "text_raw": "英伟达发布 H200，显存带宽提升 40%",
+        "text": "英伟达发布 H200，<a href='#'>显存带宽</a>提升 40%",
+        "created_at": "Mon Aug 10 12:00:00 +0800 2026",
+        "user": {"idstr": "1402400261", "screen_name": "机器之心"},
+    }]}}
+    posts = cn.walk_weibo(weibo)
+    check("a weibo status is found", len(posts) == 1, f"({len(posts)})")
+    check("markup is stripped", posts and "<a" not in posts[0]["text"])
+    check("the author is read", posts and posts[0]["author_handle"] == "机器之心")
+    check("its +0800 timestamp becomes UTC",
+          posts and posts[0]["created_at"].startswith("2026-08-10T04:"),
+          f"({posts[0]['created_at'] if posts else ''})")
+    check("the URL points at the post",
+          posts and posts[0]["url"].endswith("/1402400261/PabcDEfgh"))
+
+    nested = {"data": {"list": [{
+        "idstr": "2", "mblogid": "outer", "text_raw": "说得好",
+        "created_at": "Mon Aug 10 12:00:00 +0800 2026",
+        "user": {"idstr": "9", "screen_name": "someone"},
+        "retweeted_status": {
+            "idstr": "1", "mblogid": "inner", "text_raw": "原创内容在这里",
+            "created_at": "Mon Aug 10 11:00:00 +0800 2026",
+            "user": {"idstr": "8", "screen_name": "原作者"}},
+    }]}}
+    both = {p["id"] for p in cn.walk_weibo(nested)}
+    check("a repost keeps the original too", both == {"weibo:outer", "weibo:inner"},
+          f"({both})")
+
+    xhs = {"data": {"items": [{
+        "id": "66aabbccdd",
+        "note_id": "66aabbccdd",
+        "xsec_token": "ABC123",
+        "note_card": {
+            "display_title": "本地跑 30B 模型的实测",
+            "desc": "在 18GB 显存上跑通了，速度还行。",
+            "time": 1786000000000,
+            "user": {"nickname": "小明的AI笔记"}},
+    }]}}
+    notes = cn.walk_xhs(xhs)
+    check("a xiaohongshu note is found", len(notes) >= 1, f"({len(notes)})")
+    note = notes[0]
+    check("title leads, caption follows",
+          note["text"].startswith("本地跑 30B 模型的实测") and "18GB" in note["text"])
+    check("the xsec token is kept, or the link will not open",
+          "xsec_token=ABC123" in note["url"])
+    check("both are tagged with their platform",
+          posts[0]["platform"] == "weibo" and note["platform"] == "xhs")
+
+    # These are the posts that used to be binned as "no text".
+    from tracker import embed
+    check("and their text survives the signal guard",
+          embed.has_signal(posts[0]["text"]) and embed.has_signal(note["text"]))
+
+
 def test_threads(tmp: Path) -> None:
     print("\nthread stitching")
     from tracker import db, threads
@@ -379,6 +442,49 @@ def test_judge_queue(tmp: Path) -> None:
     check("queue still favours fresh posts", ages.count("new") > ages.count("old"),
           f"({ages.count('new')} new / {ages.count('old')} old)")
     check("queue respects the limit", len(picked) == 20, f"({len(picked)})")
+    conn.close()
+
+
+def test_admission_control(tmp: Path) -> None:
+    print("\nadmission control")
+    from tracker import db, judge
+
+    conn = db.connect(tmp / "admit.db")
+
+    def seed(pid, created_days_ago, fetched_days_ago):
+        conn.execute(
+            "INSERT INTO posts (id, author_handle, author_name, text, created_at,"
+            " fetched_at, is_retweet, capture_source, urls) VALUES "
+            f"(?,?,'','some text here',datetime('now','-{created_days_ago} days'),"
+            f" datetime('now','-{fetched_days_ago} days'),0,'timeline','[]')",
+            (pid, "a"))
+        conn.execute(
+            "INSERT INTO triage (post_id, stage, updated_at, triaged_at) "
+            "VALUES (?,'triaged',datetime('now'),datetime('now'))", (pid,))
+
+    seed("fresh", 1, 1)      # posted yesterday, seen yesterday
+    seed("sameday", 0, 0)    # posted and seen today
+    seed("history", 30, 1)   # a month old when we first saw it
+    seed("edge", 10, 1)      # well past the admission window
+    conn.commit()
+
+    held = judge.retire_backfill(conn, max_age_days=3)
+    check("history is held back", held == 2, f"({held})")
+    live = {p["id"] for p in judge.pending(conn, 20)}
+    check("only fresh posts enter the queue", live == {"fresh", "sameday"}, f"({live})")
+
+    pool = {p["id"] for p in judge.pending(conn, 20, backfill=True)}
+    check("held posts are recoverable", pool == {"history", "edge"}, f"({pool})")
+    reason = conn.execute("SELECT drop_reason FROM triage WHERE post_id='history'"
+                          ).fetchone()["drop_reason"]
+    check("with a reason recorded", reason == "backfill", f"({reason})")
+
+    # Posts rejected on their merits must not come back through this door.
+    conn.execute("UPDATE triage SET stage='dropped', drop_reason='duplicate' "
+                 "WHERE post_id='fresh'")
+    conn.commit()
+    pool = {p["id"] for p in judge.pending(conn, 20, backfill=True)}
+    check("duplicates stay dropped", "fresh" not in pool, f"({pool})")
     conn.close()
 
 
@@ -673,12 +779,14 @@ def main() -> int:
         test_multilingual()
         test_platform_urls()
         test_sources(tmp)
+        test_cn_parsers()
         test_threads(tmp)
         test_context(tmp)
         test_curation(tmp)
         test_ssrf_guard()
         test_prune_stability(tmp)
         test_judge_queue(tmp)
+        test_admission_control(tmp)
         test_extract_follows_bar(tmp)
         test_cluster()
         test_notify(tmp)

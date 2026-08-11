@@ -18,13 +18,19 @@ Everything else is optional and defaults sensibly.
 
 from __future__ import annotations
 
-from . import arxiv, hackernews, rss
+from . import arxiv, cn, hackernews, rss
 
 REGISTRY = {
     "rss": rss,
     "hn": hackernews,
     "arxiv": arxiv,
+    # Needs its own login and carries the same ban risk as X, so it is never
+    # part of a default sweep — name it explicitly.
+    "cn": cn,
 }
+
+# What a plain `sources` run touches: everything that needs no account.
+DEFAULT = ["rss", "hn", "arxiv"]
 
 
 def available() -> list[str]:
@@ -36,7 +42,7 @@ def fetch(conn, names: list[str] | None = None, limit: int = 60) -> dict:
     from .. import db
 
     results = {}
-    for name in (names or available()):
+    for name in (names or DEFAULT):
         module = REGISTRY.get(name)
         if module is None:
             results[name] = {"error": f"unknown source {name}"}

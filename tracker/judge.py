@@ -162,6 +162,37 @@ BACKLOG_SHARE = 0.25
 MAX_AGE_DAYS = 45
 
 
+# Admission control. Judging is the metered stage, so what enters its queue is
+# a spending decision — and nothing bounded it. The queue was fed by however
+# deep collection happened to scroll, which means a bigger scrape cost more
+# money without producing more signal: measured on a real corpus, 684 of 1,300
+# waiting posts were already over a week old when they were fetched.
+#
+# A post that was old when we first saw it is history, not news. History still
+# earns its place in the corpus — it is the baseline dedup compares against —
+# it just should not be paid for as if it were today's finding.
+#
+# Bounded this way, input tracks the collection *rate* rather than the depth of
+# whatever back catalogue a new source happens to expose.
+ADMIT_MAX_AGE_DAYS = 3
+
+
+def retire_backfill(conn, max_age_days: int = ADMIT_MAX_AGE_DAYS) -> int:
+    """Hold back posts that were already old when collected.
+
+    Marked, not deleted: `judge --backfill` works through them deliberately
+    when you decide that back catalogue is worth the money.
+    """
+    cur = conn.execute(
+        "UPDATE triage SET stage='dropped', drop_reason='backfill', updated_at=? "
+        "WHERE stage='triaged' AND post_id IN ("
+        "  SELECT id FROM posts "
+        "  WHERE julianday(fetched_at) - julianday(created_at) > ?)",
+        (db.now(), max_age_days))
+    conn.commit()
+    return cur.rowcount
+
+
 def retire_stale(conn, max_age_days: int = MAX_AGE_DAYS) -> int:
     """Drop posts too old to judge, with a reason, like every other drop."""
     cur = conn.execute(
@@ -192,7 +223,8 @@ def backlog(conn) -> dict:
     return {"waiting": row["n"] or 0, "oldest": row["oldest"]}
 
 
-def pending(conn, limit: int, backlog_share: float = BACKLOG_SHARE) -> list[dict]:
+def pending(conn, limit: int, backlog_share: float = BACKLOG_SHARE,
+            backfill: bool = False) -> list[dict]:
     """Posts that survived dedup and haven't been judged under this prompt.
 
     Newest first, but never *only* newest. Collection outruns the per-run limit
@@ -206,11 +238,17 @@ def pending(conn, limit: int, backlog_share: float = BACKLOG_SHARE) -> list[dict
                t.max_similarity
         FROM posts p
         JOIN triage t ON t.post_id = p.id
-        WHERE t.stage = 'triaged'
+        WHERE {stage_clause}
           AND p.created_at > datetime('now', ?)
           AND p.id NOT IN (SELECT post_id FROM judgements
                            WHERE model = ? AND prompt_version = ?)
     """
+    # The backfill pool is one specific drop reason, not everything dropped —
+    # duplicates and no-text posts were rejected on their merits and must not
+    # come back through this door.
+    base = base.format(stage_clause=(
+        "t.stage = 'dropped' AND t.drop_reason = 'backfill'" if backfill
+        else "t.stage = 'triaged'"))
     args = (f"-{MAX_AGE_DAYS} days", MODEL, PROMPT_VERSION)
     old_n = int(limit * backlog_share)
     new_n = limit - old_n
@@ -349,11 +387,18 @@ def replay(conn, limit: int = 20, model: str = MODEL, effort: str = "medium",
 
 
 def run(conn, limit: int = 20, model: str = MODEL, effort: str = "medium",
-        k: int = 5, dry_run: bool = False) -> int:
+        k: int = 5, dry_run: bool = False, backfill: bool = False,
+        admit_max_age_days: int = ADMIT_MAX_AGE_DAYS) -> int:
     stale = retire_stale(conn)
     if stale:
         print(f"{stale} posts older than {MAX_AGE_DAYS} days retired unjudged")
-    posts = pending(conn, limit)
+    if not backfill:
+        held = retire_backfill(conn, admit_max_age_days)
+        if held:
+            print(f"{held} posts held back as backfill "
+                  f"(already >{admit_max_age_days}d old when collected). "
+                  f"Judge them with: judge --backfill")
+    posts = pending(conn, limit, backfill=backfill)
     if not posts:
         print("Nothing to judge. Run ./run dedup --apply first.")
         return 0

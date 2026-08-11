@@ -33,6 +33,10 @@ DEFAULTS = {
                "threads", "dedup", "judge", "extract", "digest", "notify"],
     "collect_scrolls": 5,
     "judge_limit": 60,
+    # How old a post may be when first collected and still be worth paying to
+    # judge. This is the admission control that keeps input bounded by the
+    # collection rate rather than by how deep a scrape happened to go.
+    "admit_max_age_days": 3,
 }
 
 PRESETS = {
@@ -230,9 +234,12 @@ def _throughput(conn, settings: dict) -> dict:
         "SELECT COUNT(DISTINCT date(triaged_at)) d FROM triage "
         "WHERE triaged_at > datetime('now', '-7 days')").fetchone()["d"] or 0
     if days:
+        # Posts held back as backfill were never admitted, so counting them
+        # here would report an arrival rate the judge is not being asked to meet.
         arrived = conn.execute(
-            "SELECT COUNT(*) n FROM triage WHERE stage='triaged' "
-            "AND triaged_at > datetime('now', '-7 days')").fetchone()["n"]
+            "SELECT COUNT(*) n FROM triage "
+            "WHERE triaged_at > datetime('now', '-7 days') "
+            "AND COALESCE(drop_reason,'') != 'backfill'").fetchone()["n"]
         arriving = arrived / days
     else:
         # Nothing has been triaged since the column existed. Saying "0 arriving"

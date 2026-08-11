@@ -148,12 +148,13 @@ python tests/smoke.py
 
 ## How it works
 
-Twelve stages. Cheap deterministic filters first, the model only at the narrow
+Thirteen stages. Cheap deterministic filters first, the model only at the narrow
 end.
 
 | Stage | What it does |
 |---|---|
 | `collect` | Drives a browser, intercepts X's internal GraphQL responses. Not DOM scraping — the JSON shape is far more stable than the markup. |
+| `sources` | Reads what needs no browser: RSS/Atom feeds, the arXiv API, Hacker News. Optionally Weibo and Xiaohongshu, which do need one. |
 | `replies` | Mines conversations under tracked posts. Discovery *and* content: a sharp correction can outrank the post it replies to. |
 | `suggest` | Harvests who tracked accounts follow, ranked by how many of them follow each candidate. |
 | `links` | Resolves URLs, so "great paper: `<link>`" carries signal. arXiv abstracts get a dedicated path. |
@@ -299,6 +300,26 @@ SQLite file occasionally to reclaim the space on disk.
 **Scheduling.** `./run schedule` shows and sets when the pipeline runs, writing
 to cron or Task Scheduler. Entries carry a marker and only marked lines are ever
 touched, so it never disturbs anything else in your crontab.
+
+**Admission control.** Judging is the only metered stage, so what enters its
+queue is a spending decision — and for a long time nothing bounded it. The queue
+was fed by however deep collection happened to scroll, which means a bigger
+scrape cost more money without producing more signal: on this corpus, 684 of
+1,300 waiting posts were already over a week old when they were fetched.
+
+A post that was old when you first saw it is history, not news. It still earns
+its place in the corpus — history is the baseline dedup compares against — it
+just should not be paid for as if it were today's finding. So anything older
+than `admit_max_age_days` (default 3) when collected is held back, marked
+`backfill`, and never deleted:
+
+```bash
+./run judge --backfill        # work through the held-back pool deliberately
+```
+
+Applying this took the live queue from 1,303 to 252 in one pass. Input now
+tracks the collection *rate* rather than the depth of whatever back catalogue a
+new source exposes — which matters more with every source you add.
 
 **The judge queue.** This is the one dial worth understanding. Judging is
 metered per post, so how many a run gets through is both a quality decision and
