@@ -272,14 +272,26 @@ def _login(profile_dir, url: str, verify, timeout_s: int = 900) -> int:
         page.on("response", on_response)
         try:
             goto_with_retry(page, url)
+            log(f"Page loaded: {page.title()[:50]!r}")
         except RuntimeError as exc:
-            log(f"WARNING: {exc} — navigate there manually in the window.")
+            # Worth separating loudly: a page that never loaded is a network
+            # problem, not a sign-in problem, and the two look identical from
+            # a window that is just sitting there.
+            log(f"COULD NOT LOAD THE PAGE: {exc}")
+            log("That is a network problem, not a login problem — the window is")
+            log("open, so try navigating there by hand to confirm.")
 
+        waited = 0
         while time.time() < deadline and not confirmed["ok"]:
             try:
                 page.wait_for_timeout(2000)
             except Exception:      # the user closed the window
                 break
+            waited += 2
+            # Silence is indistinguishable from a hang. Say what is happening.
+            if waited % 30 == 0:
+                log(f"  still waiting for the service to confirm a session "
+                    f"({waited}s)")
         try:
             context.close()
         except Exception:
