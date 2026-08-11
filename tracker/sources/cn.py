@@ -43,8 +43,16 @@ XHS_PROFILE = paths.data_dir() / ".browser-profile-xhs"
 # reason TIMELINE_OPS exists for X.
 WEIBO_ENDPOINTS = ("/ajax/statuses/mymblog", "/api/container/getIndex",
                    "/ajax/feed/friendstimeline", "/ajax/statuses/searchAll")
-XHS_ENDPOINTS = ("/api/sns/web/v1/user_posted", "/api/sns/web/v1/feed",
-                 "/api/sns/web/v1/search/notes", "/api/sns/web/v1/homefeed")
+# Deliberately unversioned. Pinning these to v1 was already wrong on the day it
+# was written — search actually answers on /api/sns/web/v2/search/notes, so the
+# harvester matched nothing while the parser worked perfectly on the same data.
+# Same lesson as TIMELINE_OPS on X: match the endpoint, not its version.
+XHS_ENDPOINTS = ("/search/notes", "/homefeed", "/user_posted", "/note/feed")
+
+# Not every success:false is a login problem. /search/onebox returns
+# success:false with msg "成功" as a matter of course, which read as "the
+# service rejected every request: success".
+XHS_LOGOUT_HINTS = ("无登录信息", "登录", "login")
 
 _TAG_RE = re.compile(r"<[^>]+>")
 
@@ -178,7 +186,8 @@ def _harvest(urls, profile_dir, endpoints, walker, headless=True,
             # like a quiet day instead of a missing login.
             if isinstance(payload, dict) and payload.get("success") is False:
                 message = str(payload.get("msg") or "")
-                if message and message not in rejected:
+                if (any(h in message for h in XHS_LOGOUT_HINTS)
+                        and message not in rejected):
                     rejected.append(message)
             if not any(e in response.url for e in endpoints):
                 return
@@ -269,7 +278,10 @@ def _login(profile_dir, url: str, verify, timeout_s: int = 900) -> int:
             if verify(response.url, payload):
                 confirmed["ok"] = True
 
-        page.on("response", on_response)
+        # Listen on the context, not the page. Signing in navigates, and can
+        # open a tab; a handler bound to the first page stops hearing as soon
+        # as that happens, and the wait below then blocks on a dead object.
+        context.on("response", on_response)
         try:
             goto_with_retry(page, url)
             log(f"Page loaded: {page.title()[:50]!r}")
@@ -279,19 +291,29 @@ def _login(profile_dir, url: str, verify, timeout_s: int = 900) -> int:
             # a window that is just sitting there.
             log(f"COULD NOT LOAD THE PAGE: {exc}")
             log("That is a network problem, not a login problem — the window is")
-            log("open, so try navigating there by hand to confirm.")
+            log("open, so try navigating there by hand.")
 
+        # Sleep on the clock rather than on the page. page.wait_for_timeout
+        # raises the moment its page is navigated away or replaced, and the old
+        # loop treated any exception as "the user gave up" — so a perfectly
+        # normal redirect during sign-in looked like a cancelled login and shut
+        # the window.
         waited = 0
         while time.time() < deadline and not confirmed["ok"]:
-            try:
-                page.wait_for_timeout(2000)
-            except Exception:      # the user closed the window
-                break
+            time.sleep(2)
             waited += 2
+            if not context.pages:          # every window really is closed
+                log("  the browser window was closed")
+                break
             # Silence is indistinguishable from a hang. Say what is happening.
             if waited % 30 == 0:
+                where = ""
+                try:
+                    where = f" — currently on {context.pages[-1].url[:60]}"
+                except Exception:
+                    pass
                 log(f"  still waiting for the service to confirm a session "
-                    f"({waited}s)")
+                    f"({waited}s){where}")
         try:
             context.close()
         except Exception:
@@ -322,11 +344,23 @@ def fetch_weibo(conn, limit: int = 40, headless: bool = True) -> list[dict]:
                     headless=headless)[:limit]
 
 
-def fetch_xhs(conn, limit: int = 40, headless: bool = True) -> list[dict]:
-    ids = _targets(conn, "xhs")
-    if not ids:
-        return []
-    urls = [f"https://www.xiaohongshu.com/user/profile/{i}" for i in ids]
+# Verified against the live site: the personalised home feed of a fresh account
+# returns hiking, dating advice and travel — Xiaohongshu is a lifestyle
+# platform, and the AI content has to be asked for. Searching these returned 79
+# notes on LLMs, agent development and local deployment in one pass.
+XHS_KEYWORDS = ["大模型", "AI Agent", "AI编程", "开源模型", "提示词"]
+
+
+def fetch_xhs(conn, limit: int = 40, headless: bool = True,
+              keywords: list[str] | None = None) -> list[dict]:
+    import urllib.parse
+
+    urls = [f"https://www.xiaohongshu.com/user/profile/{i}"
+            for i in _targets(conn, "xhs")]
+    # Search rather than the home feed, which is personalised to an account
+    # that by design has no history and no interests.
+    urls += ["https://www.xiaohongshu.com/search_result?keyword="
+             + urllib.parse.quote(k) for k in (keywords or XHS_KEYWORDS)]
     return _harvest(urls, XHS_PROFILE, XHS_ENDPOINTS, walk_xhs,
                     headless=headless)[:limit]
 

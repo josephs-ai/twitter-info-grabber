@@ -260,6 +260,16 @@ def test_cn_parsers() -> None:
     check("a confirmed session is", cn._xhs_signed_in(me, logged_in))
     check("an unrelated endpoint proves nothing",
           not cn._xhs_signed_in("https://x/api/sns/web/v1/homefeed", logged_in))
+    # Pinning the endpoint to v1 matched nothing: search answers on v2, so the
+    # harvester collected zero while the parser worked on the same payloads.
+    live_paths = ["/api/sns/web/v2/search/notes", "/api/sns/web/v1/homefeed",
+                  "/api/sns/web/v1/user_posted"]
+    for path in live_paths:
+        check(f"endpoint matched regardless of version: {path.split('/')[-1]}",
+              any(e in path for e in cn.XHS_ENDPOINTS))
+    check("and an unrelated endpoint is not matched",
+          not any(e in "/api/sns/web/v1/search/onebox" for e in cn.XHS_ENDPOINTS))
+
     check("weibo needs a uid, not a cookie",
           cn._weibo_signed_in("https://weibo.com/ajax/setting/getConfig",
                               {"data": {"uid": "123"}})
