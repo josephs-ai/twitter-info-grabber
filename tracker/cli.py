@@ -27,6 +27,8 @@ from . import threads as threads_mod
 
 
 def cmd_login(args) -> int:
+    if args.wait:
+        return collect_mod.login_wait()
     return collect_mod.login(headless=args.headless)
 
 
@@ -472,6 +474,9 @@ def main(argv=None) -> int:
 
     p = sub.add_parser("login", help="interactive login; saves the browser session")
     p.add_argument("--headless", action="store_true")
+    p.add_argument("--wait", action="store_true",
+                   help="detect sign-in from the browser instead of asking here "
+                        "(used by the app, which has no terminal)")
     p.set_defaults(func=cmd_login)
 
     p = sub.add_parser("collect", help="scrape a timeline into the database")

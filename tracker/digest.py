@@ -6,10 +6,10 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 
-from . import db, extract, strictness
+from . import db, extract, paths, strictness
 
 ROOT = Path(__file__).resolve().parent.parent
-OUT_DIR = ROOT / "digests"
+OUT_DIR = paths.data_dir() / "digests"
 
 CATEGORY_ORDER = ["research", "tooling", "product", "opinion", "meta"]
 CATEGORY_TITLE = {

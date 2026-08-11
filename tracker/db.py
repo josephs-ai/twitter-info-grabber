@@ -7,9 +7,11 @@ import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_DB = ROOT / "tracker.db"
-SCHEMA = ROOT / "schema.sql"
+from . import paths
+
+ROOT = paths.code_dir()
+DEFAULT_DB = paths.data_dir() / "tracker.db"   # written: per-user when packaged
+SCHEMA = paths.code_dir() / "schema.sql"       # read-only: ships with the code
 
 
 def now() -> str:

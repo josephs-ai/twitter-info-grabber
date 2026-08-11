@@ -37,7 +37,8 @@ def test_imports() -> None:
     modules = ["db", "parse", "accounts", "collect", "context", "threads",
                "embed", "novelty", "amplify", "links", "replies", "suggest",
                "judge", "extract", "digest", "feedback", "pipeline", "cli",
-               "cluster", "health", "notify", "search", "strictness", "curate"]
+               "cluster", "health", "notify", "search", "strictness", "curate",
+               "paths", "onboard", "schedule", "app"]
     for name in modules:
         try:
             importlib.import_module(f"tracker.{name}")
@@ -396,6 +397,70 @@ def test_search(tmp: Path) -> None:
     conn.close()
 
 
+def test_read_state(tmp: Path) -> None:
+    print("\nread state")
+    from tracker import db
+
+    conn = db.connect(tmp / "reads.db")
+    _seed_judged(conn, "r1", 1, 4, 5)
+    conn.commit()
+    conn.execute("INSERT INTO reads (post_id, seen_at) VALUES ('r1', ?)", (db.now(),))
+    conn.commit()
+    seen = conn.execute("SELECT 1 FROM reads WHERE post_id='r1'").fetchone()
+    check("a post can be marked seen", seen is not None)
+    conn.execute("INSERT INTO reads (post_id, seen_at) VALUES ('r1', ?) "
+                 "ON CONFLICT(post_id) DO NOTHING", (db.now(),))
+    n = conn.execute("SELECT COUNT(*) c FROM reads").fetchone()["c"]
+    check("marking twice is idempotent", n == 1, f"({n})")
+    conn.close()
+
+
+def test_paths() -> None:
+    print("\npaths")
+    import os
+
+    from tracker import paths
+
+    check("source checkout keeps code and data together",
+          paths.code_dir() == paths.data_dir())
+    check("the schema ships with the code", (paths.code_dir() / "schema.sql").exists())
+    check("self_command targets this interpreter",
+          paths.self_command()[:1] == [sys.executable])
+    check("source builds invoke the module", "-m" in paths.self_command())
+
+    # An override has to win, or a packaged build could never be pointed at a
+    # different corpus — and the tests could not check it without side effects.
+    import tempfile as _tf
+    with _tf.TemporaryDirectory() as td:
+        os.environ["AI_SIGNAL_HOME"] = td
+        try:
+            check("AI_SIGNAL_HOME overrides the data directory",
+                  paths.data_dir() == Path(td))
+        finally:
+            del os.environ["AI_SIGNAL_HOME"]
+
+
+def test_onboarding(tmp: Path) -> None:
+    print("\nfirst run")
+    from tracker import db, onboard
+
+    conn = db.connect(tmp / "onb.db")
+    state = onboard.state(conn)
+    check("an empty database is not set up", state["done"] is False)
+    check("all four steps are reported", len(state["steps"]) == 4,
+          f"({len(state['steps'])})")
+    check("a garbage key is refused",
+          onboard.save_api_key("hunter2")["ok"] is False)
+    check("an empty key is refused", onboard.save_api_key("")["ok"] is False)
+
+    conn.execute("INSERT INTO accounts (handle, added_at, active) VALUES ('x', ?, 1)",
+                 (db.now(),))
+    conn.commit()
+    step = next(s for s in onboard.state(conn)["steps"] if s["key"] == "accounts")
+    check("adding an account completes its step", step["done"] is True)
+    conn.close()
+
+
 def main() -> int:
     print(f"python {sys.version.split()[0]} on {sys.platform}")
     with tempfile.TemporaryDirectory() as td:
@@ -414,6 +479,9 @@ def main() -> int:
         test_cluster()
         test_notify(tmp)
         test_search(tmp)
+        test_read_state(tmp)
+        test_paths()
+        test_onboarding(tmp)
 
     print(f"\n{PASSED} passed, {len(FAILED)} failed")
     if FAILED:

@@ -77,6 +77,10 @@ nav button:focus-visible { outline: 2px solid var(--signal); outline-offset: 1px
   font: 10px/1 var(--mono); letter-spacing: .16em; text-transform: uppercase;
   color: var(--faint); padding: 18px 8px 7px;
 }
+nav button b {
+  float: right; font: 10px/1.6 var(--mono); color: var(--signal); font-weight: 600;
+}
+nav button.on b { color: var(--ink); }
 
 /* --- the assay bar: this app's signature ---------------------------------- */
 .assay { border-top: 1px solid var(--rule); padding: 14px 16px 16px; }
@@ -203,6 +207,35 @@ h1 {
 }
 .also .who { margin-right: 12px; cursor: pointer; color: var(--moss); }
 .also .who:hover { text-decoration: underline; }
+
+.byline .new {
+  color: var(--ink); background: var(--signal); padding: 1px 6px;
+  border-radius: 3px; font-weight: 600;
+}
+.sorts { display: flex; gap: 8px; margin-bottom: 22px; flex-wrap: wrap; }
+.sorts .act.on { border-color: var(--signal); color: var(--signal); }
+.sorts .act:last-child { margin-left: auto; }
+
+/* --- first run ------------------------------------------------------------ */
+.step {
+  display: grid; grid-template-columns: 26px 1fr; gap: 15px;
+  padding: 17px 0; border-bottom: 1px solid var(--rule); align-items: start;
+}
+.step .dot {
+  width: 24px; height: 24px; border-radius: 50%; border: 1px solid var(--rule);
+  display: grid; place-items: center; color: var(--faint);
+  font: 11px/1 var(--mono);
+}
+.step.done .dot { border-color: var(--moss); color: var(--moss); }
+.step.now .dot { border-color: var(--signal); color: var(--signal); }
+.step.done > div > b { color: var(--muted); font-weight: 500; }
+.step > div > b { display: block; margin-bottom: 3px; }
+.stepact { margin-top: 13px; }
+.stepact .searchbar { max-width: 460px; }
+code {
+  font: 12px var(--mono); background: var(--raise); padding: 1px 5px;
+  border-radius: 3px;
+}
 
 /* --- search --------------------------------------------------------------- */
 .searchbar { display: flex; gap: 9px; margin: 0 0 26px; }
@@ -380,7 +413,7 @@ button.act.bad.on  { background: var(--rust); border-color: var(--rust); color: 
   <div class="navlist">
     <button data-v="home" class="on">Today</button>
     <div class="group">Read</div>
-    <button data-v="surfaced">Surfaced</button>
+    <button data-v="surfaced">Surfaced<b id="unread"></b></button>
     <button data-v="amplified">Corroborated</button>
     <button data-v="search">Search</button>
     <div class="group">Teach</div>
@@ -391,6 +424,7 @@ button.act.bad.on  { background: var(--rust); border-color: var(--rust); color: 
     <button data-v="pipeline">Pipeline</button>
   <button data-v="schedule">Schedule</button>
   <button data-v="curate">Self-curation</button>
+  <button data-v="setup" id="setuplink" hidden>Setting up</button>
   </div>
   <div class="assay" id="assay"></div>
   <div class="statusbar" id="status"></div>
@@ -455,6 +489,7 @@ function entry(it, rateable) {
   if (it.category) bits.push(`<span>${esc(it.category)}</span>`);
   const also = it.also || [];
   if (also.length) bits.push(`<span class="amp">${also.length + 1} sources</span>`);
+  if (it.seen === false) bits.unshift(`<span class="new">new</span>`);
 
   // No truncation: the row layout gives descriptions room to wrap as prose.
   const figs = (ex && ex.numbers || []).slice(0, 5).map(n =>
@@ -876,18 +911,113 @@ async function render() {
     return;
   }
 
+  if (view === 'setup') { return renderSetup(main); }
   if (view === 'search') { return renderSearch(main); }
 
   if (view === 'surfaced') await loadLevels();
-  const items = await api().feed(view, 40);
+  const items = await api().feed(view, 40, SORT);
   const [title, lede] = COPY[view];
   // Rating is the only thing the system cannot do for itself, so it is offered
   // on every read view rather than quarantined on its own page. Nobody visits
   // a page called "give feedback".
   main.innerHTML = `<div class="wrap"><h1>${title}</h1><div class="lede">${lede}</div>` +
-    (view === 'surfaced' ? strictWidget() : '') +
+    (view === 'surfaced' ? strictWidget() + sortWidget() : '') +
     (items.length ? items.map(it => entry(it, true)).join('')
                   : `<div class="empty">nothing clears the bar right now — try lowering it</div>`) + `</div>`;
+  markSeenSoon(items);
+}
+
+/* ---- first run ----------------------------------------------------------- */
+// Derived from the system, never from a stored "setup complete" flag — delete
+// the browser profile and step two correctly goes back to pending.
+const SETUP_ACTIONS = {
+  key: `<div class="searchbar" style="margin-bottom:10px">
+          <input id="apikey" type="password" placeholder="sk-ant-…">
+          <button class="act" onclick="saveKey()">Save</button>
+        </div>
+        <div class="hint">Written to <code>.env</code> in this folder, readable only
+          by you. Get one at console.anthropic.com.</div>`,
+  login: `<button class="act" onclick="stage('login')">Open X and sign in</button>
+          <div class="hint">A browser window opens. It closes itself once you are
+            signed in — nothing to confirm here.</div>`,
+  accounts: `<button class="act" onclick="importSeeds()">Use the starter list</button>
+             <div class="hint">Around 60 researchers, labs and engineers from
+               <code>seeds.txt</code>. Edit that file to change it.</div>`,
+  collect: `<button class="act" onclick="stage('collect')">Collect now</button>
+            <div class="hint">A few minutes, headless. Safe to run again.</div>`,
+};
+
+async function renderSetup(main) {
+  const st = await api().setup_state();
+  const next = st.steps.find(s => !s.done);
+  main.innerHTML = `<div class="wrap"><h1>Setting up</h1>
+    <div class="lede">Four things, once. Each one is checked against the system
+      rather than remembered, so you can leave and come back.</div>
+    ${st.steps.map((s, i) => `
+      <div class="step ${s.done ? 'done' : (s === next ? 'now' : '')}">
+        <div class="dot">${s.done ? '✓' : i + 1}</div>
+        <div>
+          <b>${esc(s.title)}${s.detail && s.done ? ` — ${esc(s.detail)}` : ''}</b>
+          <div class="hint">${esc(s.note)}</div>
+          ${s === next ? `<div class="stepact">${SETUP_ACTIONS[s.key]}</div>` : ''}
+        </div>
+      </div>`).join('')}
+    ${st.done ? `<div class="note">Set up. ${st.warming_up
+        ? 'Nothing has been judged yet — run the pipeline from <b>Pipeline</b>, '
+        + 'and remember novelty is measured against your own corpus, so the '
+        + 'first day or two will look generous.'
+        : 'Everything is running.'}</div>` : ''}
+    <div class="log" id="log" style="margin-top:24px">idle</div></div>`;
+}
+
+async function saveKey() {
+  const r = await api().setup_save_key(document.getElementById('apikey').value);
+  if (!r.ok) { document.getElementById('log').textContent = r.error; return; }
+  status(); render();
+}
+async function importSeeds() {
+  const r = await api().setup_import_accounts();
+  document.getElementById('log').textContent = r.ok
+    ? `${r.added} accounts added (${r.total} in seeds.txt)` : r.error;
+  render();
+}
+
+/* ---- read state ---------------------------------------------------------- */
+let SORT = 'value';
+let SEEN_TIMER = null;
+
+const SORTS = [['value', 'Most valuable'], ['new', 'Newest'], ['unread', 'Unread first']];
+
+function sortWidget() {
+  return `<div class="sorts">${SORTS.map(([k, label]) =>
+    `<button class="act ${SORT === k ? 'on' : ''}" onclick="setSort('${k}')">${label}</button>`
+  ).join('')}<button class="act" onclick="unreadAll()"
+      title="clear read state">Mark all unread</button></div>`;
+}
+function setSort(k) { SORT = k; render(); }
+async function unreadAll() { await api().mark_all_unseen(); render(); refreshUnread(); }
+
+// Marked after a delay, not on render: a view flashed past on the way
+// somewhere else has not been read, and marking it would quietly discard the
+// only signal that says what is new.
+function markSeenSoon(items) {
+  clearTimeout(SEEN_TIMER);
+  const ids = [];
+  for (const it of items) {
+    if (it.seen === false) ids.push(it.id);
+    for (const a of it.also || []) ids.push(a.id);
+  }
+  if (!ids.length) return;
+  SEEN_TIMER = setTimeout(async () => {
+    await api().mark_seen(ids);
+    refreshUnread();
+  }, 2500);
+}
+
+async function refreshUnread() {
+  const n = await api().unread();
+  const badge = document.getElementById('unread');
+  if (badge) badge.textContent = n ? n : '';
 }
 
 /* ---- search -------------------------------------------------------------- */
@@ -955,6 +1085,10 @@ window.onStageDone = (p) => {
   if (btn) btn.classList.remove('busy');
   const log = document.getElementById('log');
   if (log) log.textContent = `${p.stage} ${p.ok ? 'finished' : 'FAILED'}\n\n${p.output}`;
+  status();
+  // A step is only done when the system says so, so re-ask rather than assume
+  // the stage that just finished is the one that unblocks it.
+  if (view === 'setup') setTimeout(render, 400);
 };
 
 document.querySelectorAll('nav button').forEach(b => b.onclick = () => {
@@ -978,6 +1112,16 @@ async function boot() {
   const o = await api().overview();
   assay(o);
   status();
+  refreshUnread();
+
+  // An unconfigured tracker and a quiet day look identical on the Today page:
+  // zeros everywhere. Open on the thing that is actually blocking instead.
+  const setup = await api().setup_state();
+  if (!setup.done) {
+    view = 'setup';
+    document.querySelectorAll('nav button').forEach(b => b.classList.remove('on'));
+    document.getElementById('setuplink').hidden = false;
+  }
   render();
 }
 window.addEventListener('pywebviewready', boot);

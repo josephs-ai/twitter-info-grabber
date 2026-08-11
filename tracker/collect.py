@@ -10,10 +10,10 @@ from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
-from . import db, parse
+from . import db, parse, paths
 
 ROOT = Path(__file__).resolve().parent.parent
-PROFILE_DIR = ROOT / ".browser-profile"
+PROFILE_DIR = paths.data_dir() / ".browser-profile"
 
 
 def log(msg: str) -> None:
@@ -40,6 +40,41 @@ def goto_with_retry(page, url: str, attempts: int = 4) -> None:
             log(f"  navigation attempt {attempt}/{attempts} failed ({str(exc).splitlines()[0][:70]})")
             time.sleep(backoff)
     raise RuntimeError(f"could not load {url} after {attempts} attempts") from last
+
+
+def ensure_browser() -> bool:
+    """Download Chromium if it is not there yet.
+
+    A packaged build cannot ship it — ~150MB, and the binary has to live
+    somewhere writable anyway — so the first sign-in fetches it. From a source
+    checkout `bootstrap.py` has already done this and the check costs
+    milliseconds.
+    """
+    try:
+        with sync_playwright() as p:
+            if Path(p.chromium.executable_path).exists():
+                return True
+    except Exception:
+        pass  # executable_path itself raises when nothing is installed
+
+    log("Downloading the browser engine (~150MB, one time)...")
+    try:
+        from playwright.__main__ import main as playwright_main
+
+        argv = sys.argv
+        sys.argv = ["playwright", "install", "chromium"]
+        try:
+            playwright_main()
+        except SystemExit as exc:
+            if exc.code not in (0, None):
+                raise RuntimeError(f"playwright install exited {exc.code}")
+        finally:
+            sys.argv = argv
+    except Exception as exc:
+        log(f"Could not install the browser automatically: {exc}")
+        log("Run this yourself:  python -m playwright install chromium")
+        return False
+    return True
 
 
 def open_context(playwright, headless: bool):
@@ -78,6 +113,53 @@ def login(headless: bool = False) -> int:
         log("Session verified and saved.")
         return 0
     log("Session NOT saved — run login again.")
+    return 1
+
+
+def login_wait(timeout_s: int = 600, poll_s: float = 3.0) -> int:
+    """Login for the app, where there is no terminal to press Enter at.
+
+    The interactive version blocks on stdin, which a subprocess launched from a
+    GUI does not have — it would hang forever with no visible cause. Here the
+    signal comes from the browser instead: X sets `auth_token` once the sign-in
+    completes, so polling the context's cookies detects it without asking the
+    user to confirm anything, and closing the window is a clean way to give up.
+    """
+    if not ensure_browser():
+        return 1
+    log(f"Opening browser with profile: {PROFILE_DIR}")
+    log("Sign in to the burner account. This closes itself when you are in.")
+    deadline = time.time() + timeout_s
+    with sync_playwright() as p:
+        context = open_context(p, headless=False)
+        page = context.pages[0] if context.pages else context.new_page()
+        try:
+            goto_with_retry(page, "https://x.com/")
+        except RuntimeError as exc:
+            log(f"WARNING: {exc} — navigate to x.com manually.")
+
+        ok = False
+        while time.time() < deadline:
+            try:
+                if any(c.get("name") == "auth_token" for c in context.cookies()):
+                    ok = True
+                    break
+                page.wait_for_timeout(poll_s * 1000)
+            except Exception:          # window closed, or navigation in flight
+                try:
+                    ok = any(c.get("name") == "auth_token" for c in context.cookies())
+                except Exception:
+                    ok = False
+                break
+        try:
+            context.close()
+        except Exception:
+            pass
+
+    if ok:
+        log("Session verified and saved.")
+        return 0
+    log("Session NOT saved — sign in again.")
     return 1
 
 

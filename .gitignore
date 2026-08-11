@@ -20,3 +20,8 @@ __pycache__/
 venv/
 .venv/
 logs/
+
+# Packaged builds
+dist/
+build/
+*.spec.bak

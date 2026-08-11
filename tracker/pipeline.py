@@ -18,7 +18,7 @@ import traceback
 from datetime import datetime, timezone
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
+from . import paths
 
 
 def _stamp() -> str:
@@ -35,7 +35,7 @@ def load_env() -> None:
     Nothing fancy: KEY=value, ignore blanks and comments, never overwrite a
     variable that is already set.
     """
-    path = ROOT / ".env"
+    path = paths.data_dir() / ".env"
     if not path.exists():
         return
     for line in path.read_text().splitlines():

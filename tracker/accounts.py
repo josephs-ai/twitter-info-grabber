@@ -6,10 +6,11 @@ import json
 import sqlite3
 from pathlib import Path
 
+from . import paths
 from .db import now
 
 ROOT = Path(__file__).resolve().parent.parent
-SEEDS_FILE = ROOT / "seeds.txt"
+SEEDS_FILE = paths.code_dir() / "seeds.txt"
 
 
 def parse_seeds(path: Path = SEEDS_FILE) -> list[dict]:

@@ -19,9 +19,8 @@ import subprocess
 import sys
 from pathlib import Path
 
-from . import db
+from . import db, paths
 
-ROOT = Path(__file__).resolve().parent.parent
 MARKER = "# ai-signal-tracker"
 WINDOWS = platform.system() == "Windows"
 TASK_NAME = "AI Signal Tracker"
@@ -109,7 +108,7 @@ def save(conn, settings: dict) -> dict:
 def command_for(settings: dict) -> str:
     """The command a scheduler should run."""
     skipped = [s for s, *_ in STAGE_INFO if s not in settings.get("stages", [])]
-    parts = [sys.executable, "-m", "tracker", "daily"]
+    parts = [*paths.self_command(), "daily"]
     if skipped:
         parts += ["--skip", *skipped]
     return subprocess.list2cmdline(parts) if WINDOWS else " ".join(parts)
@@ -132,19 +131,19 @@ def _crontab_write(text: str) -> None:
 def _cron_lines(settings: dict) -> list[str]:
     days = "1-5" if settings.get("days") == "weekdays" else "*"
     command = command_for(settings)
-    log = ROOT / "logs" / "daily.log"
+    log = paths.data_dir() / "logs" / "daily.log"
     lines = []
     for slot in settings.get("times", []):
         hour, _, minute = slot.partition(":")
         lines.append(f"{int(minute)} {int(hour)} * * {days} "
-                     f"cd {ROOT} && {command} >> {log} 2>&1  {MARKER}")
+                     f"cd {paths.data_dir()} && {command} >> {log} 2>&1  {MARKER}")
     return lines
 
 
 def install(conn, settings: dict) -> dict:
     """Write the schedule to the OS. Removing ours never touches other entries."""
     settings = save(conn, settings)
-    (ROOT / "logs").mkdir(exist_ok=True)
+    (paths.data_dir() / "logs").mkdir(parents=True, exist_ok=True)
 
     if WINDOWS:
         return _install_windows(settings)
@@ -174,7 +173,7 @@ def _install_windows(settings: dict) -> dict:
     made = 0
     for i, slot in enumerate(settings.get("times", [])):
         args = ["schtasks", "/create", "/tn", f"{TASK_NAME} {i + 1}",
-                "/tr", f'cmd /c cd /d "{ROOT}" && {command_for(settings)}',
+                "/tr", f'cmd /c cd /d "{paths.data_dir()}" && {command_for(settings)}',
                 "/sc", schedule, "/st", slot, "/f"]
         if schedule == "WEEKLY":
             args += ["/d", "MON,TUE,WED,THU,FRI"]

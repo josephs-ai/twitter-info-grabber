@@ -182,3 +182,13 @@ CREATE TABLE IF NOT EXISTS extractions (
 );
 CREATE INDEX IF NOT EXISTS idx_extractions_post ON extractions(post_id);
 CREATE INDEX IF NOT EXISTS idx_extractions_ver  ON extractions(prompt_version);
+
+-- What you have already looked at. Without this, the Surfaced feed is ranked by
+-- value forever and the same three posts sit at the top every day, with nothing
+-- to distinguish "new since I last looked" from "still here". Seen-ness is a
+-- property of your reading, not of the post, so it lives in its own table
+-- rather than as a column on posts.
+CREATE TABLE IF NOT EXISTS reads (
+    post_id TEXT PRIMARY KEY REFERENCES posts(id),
+    seen_at TEXT NOT NULL
+);

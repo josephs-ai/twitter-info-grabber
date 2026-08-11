@@ -1,0 +1,107 @@
+name: Release
+
+# Tag a version to get downloadable builds:
+#     git tag v0.2.0 && git push origin v0.2.0
+#
+# The workflow can also be started by hand, which is how you check a packaging
+# change without minting a version for it.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            name: linux
+          - os: macos-latest
+            name: macos
+          - os: windows-latest
+            name: windows
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # pywebview's Linux backend is GTK bindings that pip cannot provide, and
+      # PyInstaller can only bundle what it can import.
+      - name: System dependencies (Linux)
+        if: matrix.name == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-gi python3-gi-cairo gir1.2-gtk-3.0 \
+                                  gir1.2-webkit2-4.1 libgirepository1.0-dev
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller
+        env:
+          # The GTK bindings live in the system interpreter; let the venv-less
+          # runner Python see them.
+          PYTHONPATH: /usr/lib/python3/dist-packages
+
+      - name: Tests
+        run: python tests/smoke.py
+
+      - name: Build
+        run: pyinstaller packaging/aisignal.spec --noconfirm
+        env:
+          PYTHONPATH: /usr/lib/python3/dist-packages
+
+      - name: Archive (Unix)
+        if: matrix.name != 'windows'
+        run: |
+          cd dist
+          if [ -d "AI Signal.app" ]; then
+            zip -qry "../ai-signal-${{ matrix.name }}.zip" "AI Signal.app"
+          else
+            zip -qry "../ai-signal-${{ matrix.name }}.zip" "AI Signal"
+          fi
+
+      - name: Archive (Windows)
+        if: matrix.name == 'windows'
+        run: Compress-Archive -Path "dist/AI Signal" -DestinationPath "ai-signal-windows.zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ai-signal-${{ matrix.name }}
+          path: ai-signal-${{ matrix.name }}.zip
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: "*.zip"
+          body: |
+            Unzip and run. Nothing else is installed.
+
+            The build does not include Chromium (~150MB) or the embedding model
+            (~30MB) — both are fetched on first use, because both need to live
+            somewhere writable and a signed bundle is not.
+
+            Your data lives outside the app, so replacing it with a newer
+            version keeps your corpus:
+
+            - Linux — `~/.local/share/ai-signal`
+            - macOS — `~/Library/Application Support/AI Signal`
+            - Windows — `%APPDATA%\AI Signal`
+
+            **macOS and Windows will warn that this is unsigned.** It is: there
+            is no certificate behind it. On macOS, right-click the app and
+            choose Open the first time.

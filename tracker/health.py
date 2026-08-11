@@ -16,10 +16,11 @@ the command that resolves it, or None when there is nothing to do.
 from __future__ import annotations
 
 import os
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
+from . import paths
 
 # Two days of nothing new is not a quiet week — collection is broken.
 STALE_HOURS = 48
@@ -37,6 +38,13 @@ def _age_hours(iso: str | None) -> float | None:
     return (datetime.now(timezone.utc) - stamp).total_seconds() / 3600
 
 
+def cmd(rest: str) -> str:
+    """How the user would type this, given how they installed it."""
+    if paths.FROZEN:
+        return f'"{sys.executable}" {rest}'
+    return f"./run {rest}"
+
+
 def _check(level, label, detail, fix=None) -> dict:
     return {"level": level, "label": label, "detail": detail, "fix": fix}
 
@@ -46,7 +54,7 @@ def session(conn) -> dict:
 
     profile = collect_mod.PROFILE_DIR
     if not (profile.exists() and any(profile.iterdir())):
-        return _check("fail", "Session", "not signed in", "./run login")
+        return _check("fail", "Session", "not signed in", cmd("login"))
 
     # A live profile that collects nothing is the shape an expired session
     # takes: the pages load, they just come back empty.
@@ -55,12 +63,12 @@ def session(conn) -> dict:
         "WHERE status='ok' AND posts_seen > 0 ORDER BY id DESC LIMIT 1").fetchone()
     if row is None:
         return _check("warn", "Session", "signed in, nothing collected yet",
-                      "./run collect --all")
+                      cmd("collect --all"))
     age = _age_hours(row["started_at"])
     if age is not None and age > STALE_HOURS:
         return _check("fail", "Session",
                       f"nothing collected in {age / 24:.0f} days — likely expired",
-                      "./run login")
+                      cmd("login"))
     return _check("ok", "Session", "signed in" + (f", collecting {_ago(age)}" if age else ""))
 
 
@@ -79,18 +87,18 @@ def last_run(conn) -> dict:
         "SELECT status, started_at, posts_new, error FROM runs "
         "ORDER BY id DESC LIMIT 1").fetchone()
     if row is None:
-        return _check("warn", "Last run", "never", "./run daily")
+        return _check("warn", "Last run", "never", cmd("daily"))
     age = _ago(_age_hours(row["started_at"]))
     if row["status"] != "ok":
         detail = (row["error"] or row["status"])[:90]
-        return _check("fail", "Last run", f"{detail} ({age})", "./run doctor")
+        return _check("fail", "Last run", f"{detail} ({age})", cmd("doctor"))
     return _check("ok", "Last run", f"+{row['posts_new']} new, {age}")
 
 
 def api_key(conn=None) -> dict:
     if os.environ.get("ANTHROPIC_API_KEY"):
         return _check("ok", "API key", "set")
-    env = ROOT / ".env"
+    env = paths.data_dir() / ".env"
     if env.exists() and "ANTHROPIC_API_KEY" in env.read_text():
         return _check("ok", "API key", "in .env")
     return _check("fail", "API key", "missing — judging and extraction are skipped",
@@ -113,7 +121,7 @@ def queue(conn) -> dict:
     # take weeks to drain even with the backlog slice.
     level = "warn" if waiting > 300 else "ok"
     return _check(level, "Judge queue", detail,
-                  "./run judge --limit 200" if level == "warn" else None)
+                  cmd("judge --limit 200") if level == "warn" else None)
 
 
 def report(conn) -> list[dict]:

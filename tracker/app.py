@@ -24,6 +24,7 @@ from . import accounts as accounts_mod
 from . import extract as extract_mod
 from . import judge as judge_mod
 from . import notify as notify_mod
+from . import onboard, paths
 from . import amplify, db, digest, feedback, health, novelty
 from . import cluster as cluster_mod
 from . import curate as curate_mod
@@ -31,8 +32,8 @@ from . import search as search_mod
 from . import schedule as schedule_mod
 from . import strictness as strict_mod
 
-ROOT = Path(__file__).resolve().parent.parent
-UI = ROOT / "ui" / "index.html"
+ROOT = paths.code_dir()
+UI = paths.code_dir() / "ui" / "index.html"
 
 
 class Api:
@@ -85,6 +86,8 @@ class Api:
         items = []
         for row in rows:
             item = dict(row)
+            item["seen"] = conn.execute(
+                "SELECT 1 FROM reads WHERE post_id=?", (item["id"],)).fetchone() is not None
             item["images"] = [
                 r["url"] for r in conn.execute(
                     "SELECT url FROM media WHERE post_id=? AND kind='photo' LIMIT 2",
@@ -111,7 +114,8 @@ class Api:
             out.append(lead)
         return out
 
-    def feed(self, mode: str = "surfaced", limit: int = 40) -> list[dict]:
+    def feed(self, mode: str = "surfaced", limit: int = 40,
+             sort: str = "value") -> list[dict]:
         """mode: surfaced | nearmiss | unrated | amplified"""
         conn = self._conn()
         try:
@@ -123,8 +127,17 @@ class Api:
             """
             if mode == "surfaced":
                 where, params = strict_mod.clause(strict_mod.load(conn))
+                # Ranking by value alone froze the same posts at the top every
+                # day, with nothing to mark what had arrived since you last
+                # looked. Both orderings are useful; neither is right always.
+                order = {
+                    "value": "j.value DESC, p.amplifiers DESC",
+                    "new": "p.created_at DESC",
+                    "unread": ("(p.id IN (SELECT post_id FROM reads)) ASC, "
+                               "j.value DESC"),
+                }.get(sort, "j.value DESC, p.amplifiers DESC")
                 rows = conn.execute(
-                    base + f" WHERE {where} ORDER BY j.value DESC, p.amplifiers DESC LIMIT ?",
+                    base + f" WHERE {where} ORDER BY {order} LIMIT ?",
                     (*params, limit)).fetchall()
                 # One story per entry. Six accounts announcing one release is
                 # corroboration, not six things to read.
@@ -165,6 +178,65 @@ class Api:
         conn = self._conn()
         try:
             return digest.build(conn, since_hours=999999, limit=20, write=False)
+        finally:
+            conn.close()
+
+    # -- first run -------------------------------------------------------------
+
+    def setup_state(self) -> dict:
+        conn = self._conn()
+        try:
+            return onboard.state(conn)
+        finally:
+            conn.close()
+
+    def setup_save_key(self, key: str) -> dict:
+        return onboard.save_api_key(key)
+
+    def setup_import_accounts(self) -> dict:
+        conn = self._conn()
+        try:
+            total, added = accounts_mod.import_seeds(conn)
+            return {"ok": True, "total": total, "added": added}
+        except Exception as exc:  # noqa: BLE001 - surfaced in the UI
+            return {"ok": False, "error": str(exc)}
+        finally:
+            conn.close()
+
+    def unread(self) -> int:
+        """How many posts clearing the bar you have not looked at."""
+        conn = self._conn()
+        try:
+            where, params = strict_mod.clause(strict_mod.load(conn))
+            row = conn.execute(
+                f"SELECT COUNT(DISTINCT j.post_id) n FROM judgements j "
+                f"WHERE {where} AND j.post_id NOT IN (SELECT post_id FROM reads)",
+                params).fetchone()
+            return row["n"] if row else 0
+        finally:
+            conn.close()
+
+    def mark_seen(self, ids: list[str]) -> int:
+        """Called once the entries have actually been on screen for a moment."""
+        if not ids:
+            return 0
+        conn = self._conn()
+        try:
+            stamp = db.now()
+            conn.executemany(
+                "INSERT INTO reads (post_id, seen_at) VALUES (?,?) "
+                "ON CONFLICT(post_id) DO NOTHING", [(i, stamp) for i in ids])
+            conn.commit()
+            return len(ids)
+        finally:
+            conn.close()
+
+    def mark_all_unseen(self) -> int:
+        conn = self._conn()
+        try:
+            cur = conn.execute("DELETE FROM reads")
+            conn.commit()
+            return cur.rowcount
         finally:
             conn.close()
 
@@ -338,6 +410,9 @@ class Api:
         # on the page but missing from this map, so its button returned
         # "unknown stage".
         commands = {
+            # --wait, not the interactive login: this has no stdin to press
+            # Enter at, so it watches the browser for the session cookie.
+            "login": ["--wait"],
             "collect": ["--all", "--scrolls", "5", "--headless"],
             "replies": ["--limit", "4"],
             "suggest": ["--seeds", "2"],
@@ -358,7 +433,7 @@ class Api:
         def worker():
             try:
                 proc = subprocess.run(
-                    [sys.executable, "-m", "tracker", stage, *commands[stage]],
+                    [*paths.self_command(), stage, *commands[stage]],
                     capture_output=True, text=True, timeout=3600, cwd=str(ROOT))
                 tail = (proc.stdout or proc.stderr or "").strip().splitlines()[-6:]
                 payload = {"stage": stage, "ok": proc.returncode == 0,

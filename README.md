@@ -48,6 +48,33 @@ machinery. Expect to edit `seeds.txt` and tune the judge to your taste.
 
 ## Setup
 
+### Download a build
+
+Grab the zip for your platform from
+[Releases](https://github.com/josephs-ai/twitter-info-grabber/releases), unzip,
+and run it. Nothing is installed. The app opens on a four-step setup page —
+paste an API key, sign in, take the starter list, collect — and each step is
+checked against the system rather than remembered, so you can stop halfway and
+come back.
+
+![Setting up](ui/assets/screenshot-setup.png)
+
+Chromium (~150MB) and the embedding model (~30MB) are fetched on first use
+rather than bundled; both have to live somewhere writable, which a signed app
+bundle is not. Your data lives outside the app, so replacing it with a newer
+build keeps your corpus:
+
+| | |
+|---|---|
+| Linux | `~/.local/share/ai-signal` |
+| macOS | `~/Library/Application Support/AI Signal` |
+| Windows | `%APPDATA%\AI Signal` |
+
+Set `AI_SIGNAL_HOME` to put it somewhere else. **The builds are unsigned** —
+macOS and Windows will say so; on macOS, right-click and Open the first time.
+
+### Or run from source
+
 Python 3.11+. A desktop session is needed for the app and for signing in.
 
 ```bash
@@ -56,6 +83,7 @@ cd twitter-info-grabber
 python3 bootstrap.py          # any platform
 ```
 
+A source checkout keeps everything in the project folder, exactly as before.
 Then add your key to `.env` and sign in to a burner account:
 
 | | Linux / macOS | Windows |
@@ -184,6 +212,12 @@ thing while an exact string like `Qwen3-235B` still ranks first.
 is silent: an expired session collects nothing and looks exactly like a quiet
 day. Session, last run, API key and judge queue are always on screen. `./run
 doctor` prints the same four checks.
+
+**Read state.** Posts you have not seen are marked `new`, and the count sits on
+the Surfaced tab. Entries are marked read a couple of seconds after they render
+— a view flashed past on the way somewhere else has not been read, and marking
+it would discard the only signal that says what is new. Sorting by *Most
+valuable*, *Newest* or *Unread first* is a click.
 
 ---
 
@@ -336,6 +370,7 @@ a network change and aborts in-flight requests.
 ```
 tracker/     the pipeline, one module per stage
 ui/          desktop app front end (plain HTML, no build step)
+packaging/   PyInstaller spec and the frozen entry point
 spike/       the throwaway proof that GraphQL interception works
 schema.sql   the database, heavily commented
 SPEC.md      the original design and why each decision was made
@@ -344,6 +379,16 @@ seeds.txt    who is tracked — edit this
 
 Everything reads from one SQLite file. Swap the collection layer and nothing
 downstream notices.
+
+`tracker/paths.py` decides where things live. From a checkout, code and data
+share the project folder. Packaged, code is read-only inside the bundle and data
+goes to the per-user location — so an update can replace the executable without
+touching your corpus. Build one yourself with:
+
+```bash
+pip install pyinstaller
+pyinstaller packaging/aisignal.spec --noconfirm
+```
 
 ---
 
