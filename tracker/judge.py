@@ -151,23 +151,82 @@ def build_prompt(post: dict, neighbours: list[dict]) -> str:
     return "\n".join(parts)
 
 
-def pending(conn, limit: int) -> list[dict]:
-    """Posts that survived dedup and haven't been judged under this prompt."""
-    rows = conn.execute(
+BACKLOG_SHARE = 0.25
+
+# Collection scrolls a profile, so it picks up whatever history is on the page —
+# pinned posts, old threads, replies from years ago. Those can never be judged
+# meaningfully: novelty is measured against a rolling window, and a post older
+# than that window has no neighbours left to compare against. They sat in the
+# queue forever, inflating the backlog and, once the queue drained by age,
+# would have spent real money scoring 2018 tweets for freshness.
+MAX_AGE_DAYS = 45
+
+
+def retire_stale(conn, max_age_days: int = MAX_AGE_DAYS) -> int:
+    """Drop posts too old to judge, with a reason, like every other drop."""
+    cur = conn.execute(
+        "UPDATE triage SET stage='dropped', drop_reason='stale', updated_at=? "
+        "WHERE stage='triaged' AND post_id IN ("
+        "  SELECT id FROM posts WHERE created_at < datetime('now', ?))",
+        (db.now(), f"-{max_age_days} days"))
+    conn.commit()
+    return cur.rowcount
+
+
+def backlog(conn) -> dict:
+    """How much has survived dedup and is still waiting on the judge.
+
+    Worth reporting rather than inferring: a backlog that grows every day means
+    the run limit is below the collection rate, and nothing else in the system
+    says so.
+    """
+    row = conn.execute(
         """
+        SELECT COUNT(*) n, MIN(p.created_at) oldest
+        FROM posts p JOIN triage t ON t.post_id = p.id
+        WHERE t.stage = 'triaged'
+          AND p.created_at > datetime('now', ?)
+          AND p.id NOT IN (SELECT post_id FROM judgements
+                           WHERE model = ? AND prompt_version = ?)
+        """, (f"-{MAX_AGE_DAYS} days", MODEL, PROMPT_VERSION)).fetchone()
+    return {"waiting": row["n"] or 0, "oldest": row["oldest"]}
+
+
+def pending(conn, limit: int, backlog_share: float = BACKLOG_SHARE) -> list[dict]:
+    """Posts that survived dedup and haven't been judged under this prompt.
+
+    Newest first, but never *only* newest. Collection outruns the per-run limit
+    on a busy day, and a purely descending queue means anything that falls
+    behind can never catch up — the backlog freezes and grows, permanently
+    unjudged. So a slice of every run is spent on the oldest waiting posts,
+    which drains it at a steady rate no matter how noisy today was.
+    """
+    base = """
         SELECT p.id, p.author_handle, p.text, p.created_at, p.thread_size,
                t.max_similarity
         FROM posts p
         JOIN triage t ON t.post_id = p.id
         WHERE t.stage = 'triaged'
+          AND p.created_at > datetime('now', ?)
           AND p.id NOT IN (SELECT post_id FROM judgements
                            WHERE model = ? AND prompt_version = ?)
-        ORDER BY p.created_at DESC
-        LIMIT ?
-        """,
-        (MODEL, PROMPT_VERSION, limit),
-    ).fetchall()
-    return [dict(r) for r in rows]
+    """
+    args = (f"-{MAX_AGE_DAYS} days", MODEL, PROMPT_VERSION)
+    old_n = int(limit * backlog_share)
+    new_n = limit - old_n
+
+    rows = conn.execute(base + " ORDER BY p.created_at DESC LIMIT ?",
+                        (*args, new_n)).fetchall()
+    posts = [dict(r) for r in rows]
+
+    if old_n:
+        seen = {p["id"] for p in posts}
+        for r in conn.execute(base + " ORDER BY p.created_at ASC LIMIT ?",
+                              (*args, old_n + len(seen))).fetchall():
+            if r["id"] in seen or len(posts) >= limit:
+                continue
+            posts.append(dict(r))
+    return posts
 
 
 def _content(post: dict, neighbours: list[dict]) -> list[dict]:
@@ -291,10 +350,17 @@ def replay(conn, limit: int = 20, model: str = MODEL, effort: str = "medium",
 
 def run(conn, limit: int = 20, model: str = MODEL, effort: str = "medium",
         k: int = 5, dry_run: bool = False) -> int:
+    stale = retire_stale(conn)
+    if stale:
+        print(f"{stale} posts older than {MAX_AGE_DAYS} days retired unjudged")
     posts = pending(conn, limit)
     if not posts:
         print("Nothing to judge. Run ./run dedup --apply first.")
         return 0
+    waiting = backlog(conn)["waiting"]
+    if waiting > len(posts):
+        print(f"{waiting:,} waiting; judging {len(posts)} "
+              f"({int(limit * BACKLOG_SHARE)} from the back of the queue)")
 
     if dry_run:
         print(f"{len(posts)} posts would be judged with {model} (effort={effort})")

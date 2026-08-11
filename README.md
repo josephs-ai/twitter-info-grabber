@@ -7,7 +7,8 @@ Follows a curated set of AI researchers on X and surfaces only the posts that
 are both **new** and **worth reading** — then extracts the actual findings, so
 you get the information rather than a reading list.
 
-A recent day: 2,635 posts collected, 3 surfaced. One of them:
+A recent week: 3,411 posts collected, 313 reached the judge, 8 cleared the bar.
+One of them:
 
 > **Training a single Transformer layer during RL post-training recovers most of
 > the gains from full-parameter RL, with high-contribution layers concentrated in
@@ -115,7 +116,8 @@ python tests/smoke.py
 
 ## How it works
 
-Ten stages. Cheap deterministic filters first, the model only at the narrow end.
+Twelve stages. Cheap deterministic filters first, the model only at the narrow
+end.
 
 | Stage | What it does |
 |---|---|
@@ -129,8 +131,10 @@ Ten stages. Cheap deterministic filters first, the model only at the narrow end.
 | `dedup` | Embeds every post twice — lexical and semantic — and takes the max. Near-duplicates drop before any API call. |
 | `judge` | Scores novelty and value separately, seeing the complete unit: thread, quoted post, link content, images, amplifier count. |
 | `extract` | Pulls the headline, claims, figures, and entities out of whatever survived. |
+| `digest` | Writes the day's findings to a Markdown file. |
+| `notify` | Tells you, if anything cleared the bar. Desktop notification, webhook, or both. |
 
-Two ideas do most of the work.
+Three ideas do most of the work.
 
 **Novelty is relative to your corpus, not to a model's training data.** Asking a
 model "is this new?" gets you a judgement against a months-stale snapshot with
@@ -138,6 +142,16 @@ no idea what you have already been shown. Instead, each candidate is compared
 against everything collected in a rolling window; borderline cases go to the
 judge *with the similar prior posts attached*, turning a vague question into a
 grounded comparison.
+
+**Repetition is grouped, not dropped.** Six accounts announcing one model
+release is one story with six sources — real corroboration, and the fact that
+six people bothered is itself evidence. Dedup cannot catch this and should not
+try: the posts are independently written and score 0.64–0.80 against each
+other, under any threshold safe enough to use. So grouping happens at read time,
+on the *extracted* headline rather than the raw post — extraction strips each
+author's framing down to what happened, which pushes the same five posts to
+0.79–0.86 and makes the underlying story comparable. Every member is kept; the
+best-scored one leads and the rest become its sources.
 
 **Nothing is ever deleted.** Dropped posts keep their similarity score, nearest
 match, and drop reason. "What did the filter throw away, and was any of it
@@ -155,7 +169,21 @@ there is one implementation of every rule.
 *What cleared the bar, with the findings extracted: headline, claims, figures
 with units, and why it matters. The original post is collapsed underneath as
 evidence rather than as the story. The slider at the top moves the bar and
-re-filters everything already judged, instantly.*
+re-filters everything already judged, instantly. `5 sources` on an entry means
+five accounts reported the same thing independently.*
+
+![Search](ui/assets/screenshot-search.png)
+
+**Search** covers everything collected, judged or not — which matters, because
+most of the corpus never reaches the judge and is still the best record of what
+was said. It combines the semantic and lexical vectors already built for dedup
+with a literal substring match, so a query finds posts that *mean* the same
+thing while an exact string like `Qwen3-235B` still ranks first.
+
+**The status panel** sits under the funnel because every failure this system has
+is silent: an expired session collects nothing and looks exactly like a quiet
+day. Session, last run, API key and judge queue are always on screen. `./run
+doctor` prints the same four checks.
 
 ---
 
@@ -234,14 +262,46 @@ SQLite file occasionally to reclaim the space on disk.
 to cron or Task Scheduler. Entries carry a marker and only marked lines are ever
 touched, so it never disturbs anything else in your crontab.
 
+**The judge queue.** Collection outruns the per-run judging limit on a busy day.
+A purely newest-first queue means anything that falls behind never catches up,
+so a quarter of every run goes to the oldest waiting posts. Posts older than the
+45-day novelty window are retired unjudged — they have no neighbours left to
+compare against, so a novelty score for them would be meaningless. `./run
+doctor` reports the depth; if it climbs run-to-run, raise `judge_limit` or
+schedule more often.
+
+---
+
+## Being told
+
+A filter that runs on a schedule is only worth having if it can reach you.
+Otherwise you go back to checking a feed, which is the habit this replaces.
+
+![Delivery](ui/assets/screenshot-delivery.png)
+
+```bash
+./run notify --desktop on
+./run notify --webhook https://hooks.slack.com/…    # Slack, Discord, anything
+./run notify --dry-run                              # see the message, send nothing
+```
+
+Both channels are off until you set them, and the same settings live on the
+Schedule page. The message is grouped by story first, so one release announced
+by six accounts arrives as one line with six sources — a notification that
+repeats itself gets muted within a day. A watermark makes delivery exactly-once,
+and it is deliberately one-directional: loosening the strictness bar does not
+fire three hundred notifications for posts it newly admits.
+
 ## Commands
 
 ```
-collect   replies   suggest   links   amplify   curate   threads
-dedup     judge     extract   digest        the pipeline, in order
+collect   replies   suggest   links   curate   amplify   threads
+dedup     judge     extract   digest   notify      the pipeline, in order
 
 daily     run every stage once      app       open the desktop app
+search    query everything collected, judged or not
 schedule  when it runs by itself    doctor    check session, db, last run
+notify    announce findings; set desktop and webhook
 review    read past judgements      rate      record what you thought
 replay    re-judge under a new prompt         stats     what is in the database
 accounts  who is tracked            candidates  who was discovered
@@ -297,8 +357,9 @@ The parts most likely to need work from someone other than me:
 - **The lexical + semantic embedding pair is a compromise.** It avoids a 2.5GB
   torch install at some cost in accuracy. `tracker/embed.py` takes any backend
   exposing `encode()`; a real sentence-transformer would drop straight in.
-- **Only Linux is tested.** pywebview supports macOS and Windows, and nothing
-  else is platform-specific, but nobody has tried it.
+- **Only Linux has been used in anger.** CI runs the suite on macOS and Windows,
+  but nobody has actually lived with the app there — the desktop notification
+  paths in `tracker/notify.py` especially would benefit from a real user.
 
 Keep the two invariants: **nothing is ever deleted** (dropped posts keep their
 reason so filtering stays auditable), and **cheap filters run before expensive

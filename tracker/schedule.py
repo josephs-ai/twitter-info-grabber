@@ -30,8 +30,8 @@ DEFAULTS = {
     "enabled": False,
     "times": ["07:00"],          # 24h local time
     "days": "everyday",          # everyday | weekdays
-    "stages": ["collect", "replies", "suggest", "links", "amplify",
-               "threads", "dedup", "judge", "extract", "digest"],
+    "stages": ["collect", "replies", "suggest", "links", "curate", "amplify",
+               "threads", "dedup", "judge", "extract", "digest", "notify"],
     "collect_scrolls": 5,
     "judge_limit": 60,
 }
@@ -50,12 +50,14 @@ STAGE_INFO = [
     ("replies",  "Mine conversations", "Finds people who reply under tracked posts."),
     ("suggest",  "Harvest follow graph", "Discovers accounts. Heaviest browsing."),
     ("links",    "Resolve links", "Fetches titles and abstracts behind URLs."),
+    ("curate",   "Manage the roster", "Promotes and drops accounts on evidence."),
     ("amplify",  "Count amplification", "How many tracked accounts shared each post."),
     ("threads",  "Stitch threads", "Joins self-threads into one item."),
     ("dedup",    "Find duplicates", "Local only. No API cost."),
     ("judge",    "Score posts", "Costs API credit. Roughly $0.0025 per post."),
     ("extract",  "Pull out findings", "Costs API credit. Surfaced posts only."),
     ("digest",   "Write the digest", "Renders the Markdown file."),
+    ("notify",   "Tell you about it", "Desktop notification and webhook, if set."),
 ]
 
 
@@ -65,13 +67,27 @@ def _table(conn) -> None:
     conn.commit()
 
 
+# What STAGE_INFO listed before `curate` and `notify` were added. A saved
+# schedule stores the stages that were ON, so a stage added later is simply
+# absent from it and would read as "turned off" — silently disabling every new
+# stage for everyone who ever saved a schedule. Comparing against the list that
+# actually shipped tells the two cases apart: absent-and-known means the user
+# turned it off, absent-and-unknown means it did not exist yet.
+LEGACY_STAGES = ["collect", "replies", "suggest", "links", "amplify",
+                 "threads", "dedup", "judge", "extract", "digest"]
+
+
 def load(conn) -> dict:
     _table(conn)
     row = conn.execute("SELECT value FROM settings WHERE key='schedule'").fetchone()
     settings = dict(DEFAULTS)
     if row:
         try:
-            settings.update(json.loads(row["value"]))
+            saved = json.loads(row["value"])
+            if "stages" in saved:
+                turned_off = set(LEGACY_STAGES) - set(saved["stages"])
+                saved["stages"] = [s for s, *_ in STAGE_INFO if s not in turned_off]
+            settings.update(saved)
         except json.JSONDecodeError:
             pass
     return settings

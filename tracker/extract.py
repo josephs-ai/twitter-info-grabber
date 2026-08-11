@@ -21,7 +21,7 @@ import json
 
 import anthropic
 
-from . import context, db
+from . import context, db, strictness
 from .judge import MODEL, _content, build_prompt, unescape
 
 PROMPT_VERSION = "x1"
@@ -97,7 +97,15 @@ SCHEMA = {
 
 
 def pending(conn, limit: int, force: bool = False) -> list[dict]:
-    """Surfaced posts without an extraction under the current prompt version."""
+    """Posts clearing the current bar, without an extraction at this prompt version.
+
+    This follows the strictness setting rather than the stored `verdict`. The
+    two came apart when the bar moved to read time: loosening the slider showed
+    more posts in the feed, but extraction still keyed off the frozen verdict,
+    so the extra posts rendered as raw text — the tool's whole point missing
+    exactly when the funnel widened.
+    """
+    where, bar = strictness.clause(strictness.load(conn))
     clause = "" if force else (
         "AND p.id NOT IN (SELECT post_id FROM extractions WHERE prompt_version = ?)")
     params = [PROMPT_VERSION] if not force else []
@@ -105,9 +113,9 @@ def pending(conn, limit: int, force: bool = False) -> list[dict]:
         f"""
         SELECT DISTINCT p.id, p.author_handle, p.text, p.created_at, p.thread_size
         FROM posts p JOIN judgements j ON j.post_id = p.id
-        WHERE j.verdict = 'surface' {clause}
-        ORDER BY p.created_at DESC LIMIT ?
-        """, (*params, limit)).fetchall()
+        WHERE {where} {clause}
+        ORDER BY j.value DESC, p.created_at DESC LIMIT ?
+        """, (*bar, *params, limit)).fetchall()
     return [dict(r) for r in rows]
 
 

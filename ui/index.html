@@ -95,6 +95,28 @@ nav button:focus-visible { outline: 2px solid var(--signal); outline-offset: 1px
 .stage.out .track i { background: var(--signal); }
 .stage.out .lab b { color: var(--signal); }
 
+/* --- status: the machinery, always visible -------------------------------- */
+.statusbar { border-top: 1px solid var(--rule); padding: 13px 16px 16px; }
+.statusbar h4 {
+  margin: 0 0 9px; font: 10px/1 var(--mono); letter-spacing: .16em;
+  text-transform: uppercase; color: var(--faint);
+}
+.chk {
+  display: grid; grid-template-columns: 7px 1fr; gap: 7px; align-items: baseline;
+  font: 10.5px/1.5 var(--mono); color: var(--muted); margin-bottom: 6px;
+}
+.chk i {
+  width: 5px; height: 5px; border-radius: 50%; background: var(--moss);
+  align-self: center;
+}
+.chk.warn i { background: var(--signal); }
+.chk.fail i { background: var(--rust); }
+.chk b {
+  grid-column: 2; display: block; font-weight: 400; color: var(--faint);
+  font-size: 10px;
+}
+.chk.fail b { color: var(--rust); }
+
 /* --- content ------------------------------------------------------------- */
 main { overflow-y: auto; padding: 30px 40px 80px; }
 .wrap, .wide { margin: 0 auto; }
@@ -167,6 +189,30 @@ h1 {
   .verdict {
   font: 11px/1.6 var(--mono); color: var(--faint); margin-bottom: 14px;
   border-left: 1px solid var(--rule); padding-left: 13px;
+}
+
+/* Corroboration: the same story from independent accounts, folded into one
+   entry. The count is the point — six people bothering is itself evidence. */
+.also {
+  font: 11px/1.7 var(--mono); color: var(--muted); margin-bottom: 14px;
+  border-left: 1px solid var(--moss); padding-left: 13px;
+}
+.also em {
+  display: block; font-style: normal; font-size: 9.5px; letter-spacing: .16em;
+  text-transform: uppercase; color: var(--faint); margin-bottom: 4px;
+}
+.also .who { margin-right: 12px; cursor: pointer; color: var(--moss); }
+.also .who:hover { text-decoration: underline; }
+
+/* --- search --------------------------------------------------------------- */
+.searchbar { display: flex; gap: 9px; margin: 0 0 26px; }
+.searchbar input {
+  flex: 1; background: var(--panel); border: 1px solid var(--rule);
+  border-radius: 4px; padding: 10px 13px; color: var(--paper);
+  font: 14px/1.5 var(--sans);
+}
+.searchbar input:focus {
+  outline: none; border-color: var(--signal);
 }
 
 /* --- strictness control -------------------------------------------------- */
@@ -336,6 +382,7 @@ button.act.bad.on  { background: var(--rust); border-color: var(--rust); color: 
     <div class="group">Read</div>
     <button data-v="surfaced">Surfaced</button>
     <button data-v="amplified">Corroborated</button>
+    <button data-v="search">Search</button>
     <div class="group">Teach</div>
     <button data-v="unrated">Rate queue</button>
     <button data-v="nearmiss">Near misses</button>
@@ -346,6 +393,7 @@ button.act.bad.on  { background: var(--rust); border-color: var(--rust); color: 
   <button data-v="curate">Self-curation</button>
   </div>
   <div class="assay" id="assay"></div>
+  <div class="statusbar" id="status"></div>
 </nav>
 <main id="main"><div class="empty">reading database…</div></main>
 
@@ -405,6 +453,8 @@ function entry(it, rateable) {
   if (it.amplifiers > 0) bits.push(`<span class="amp">shared ×${it.amplifiers}</span>`);
   if (it.novelty) bits.push(`<span>n${it.novelty} v${it.value}</span>`);
   if (it.category) bits.push(`<span>${esc(it.category)}</span>`);
+  const also = it.also || [];
+  if (also.length) bits.push(`<span class="amp">${also.length + 1} sources</span>`);
 
   // No truncation: the row layout gives descriptions room to wrap as prose.
   const figs = (ex && ex.numbers || []).slice(0, 5).map(n =>
@@ -430,6 +480,9 @@ function entry(it, rateable) {
     ${body}
     ${(it.images || []).length ? `<div class="imgs">${
       it.images.map(u => `<img src="${esc(u)}" loading="lazy" alt="">`).join('')}</div>` : ''}
+    ${also.length ? `<div class="also"><em>also reported by</em>${
+      also.map(a => `<span class="who" onclick="ext('${a.url}')">@${esc(a.handle)}</span>`)
+          .join('')}</div>` : ''}
     ${it.rationale ? `<div class="verdict"><em>judge's note</em>${esc(it.rationale)}</div>` : ''}
     <div class="row">
       ${rateable ? `
@@ -525,9 +578,63 @@ async function renderSchedule(wrap) {
       ${running ? `<button class="act" onclick="saveSchedule(false)">Turn off</button>` : ''}
       <button class="act" onclick="stage('digest')">Run once now</button>
     </div>
-    <div class="cmd" id="scmd">${esc(st.command)}</div>`;
+    <div class="cmd" id="scmd">${esc(st.command)}</div>
+
+    <h1 style="font-size:15px;margin-top:38px">When it finds something</h1>
+    <p class="lede">A run on a schedule is only worth having if it can tell you.
+    Findings are grouped by story first, so one release announced by six accounts
+    arrives as one line with six sources.</p>
+    <div id="notifybox"></div>`;
 
   paintSchedule();
+  renderNotify();
+}
+
+/* ---- delivery ------------------------------------------------------------ */
+let NOTIFY = null;
+
+async function renderNotify() {
+  const st = await api().notify_status();
+  NOTIFY = st.settings;
+  const box = document.getElementById('notifybox');
+  if (!box) return;
+  box.innerHTML = `
+    <div class="field">
+      <div class="choices">
+        <div class="choice ${NOTIFY.desktop ? 'on' : ''}" onclick="toggleDesktop()">
+          <b>Desktop notification</b><span>uses whatever your OS already has</span></div>
+      </div>
+    </div>
+    <div class="field">
+      <label>Webhook</label>
+      <div class="hint">One POST per run. The body works as-is for Slack and Discord.</div>
+      <div class="searchbar">
+        <input id="wh" placeholder="https://hooks.slack.com/… (optional)"
+               value="${esc(NOTIFY.webhook_url || '')}">
+      </div>
+    </div>
+    <div class="row">
+      <button class="act" onclick="saveNotify()">Save</button>
+      <button class="act" onclick="testNotify()">Send a test</button>
+      <span class="hint" id="nmsg" style="align-self:center">${
+        st.pending ? st.pending + ' waiting to be announced' : 'nothing waiting'}</span>
+    </div>`;
+}
+
+function toggleDesktop() { NOTIFY.desktop = !NOTIFY.desktop; renderNotifyState(); }
+function renderNotifyState() {
+  document.querySelector('#notifybox .choice').classList.toggle('on', !!NOTIFY.desktop);
+}
+async function saveNotify() {
+  NOTIFY.webhook_url = document.getElementById('wh').value.trim();
+  await api().notify_save(NOTIFY);
+  document.getElementById('nmsg').textContent = 'saved';
+}
+async function testNotify() {
+  await saveNotify();
+  const r = await api().notify_test();
+  document.getElementById('nmsg').textContent =
+    r.sent.length ? 'sent via ' + r.sent.join(', ') : 'nothing sent — no channel worked';
 }
 
 function paintSchedule() {
@@ -714,10 +821,11 @@ async function render() {
     // survivors get the signal colour because they are the only ones you read.
     const parts = [
       ['surfaced',  o.surfaced || 0,        'var(--signal)', 'reached you'],
-      ['waiting',   (f.triaged || 0) + (f.collected || 0), '#7d7466', 'still in the pipeline'],
+      ['queued',    o.waiting || 0,         '#7d7466', 'waiting on the judge'],
       ['duplicate', f.duplicate || 0,       '#5f584e', 'said already'],
       ['thread',    f.thread_part || 0,     '#484239', 'folded into a thread'],
       ['low value', f.low_value || 0,       '#382f28', 'judged not worth it'],
+      ['stale',     f.stale || 0,           '#332c26', 'older than the window'],
       ['no text',   f.no_text || 0,         '#2a2622', 'link or emoji only'],
     ].filter(p => p[1] > 0);
     const total = parts.reduce((a, p) => a + p[1], 0) || 1;
@@ -729,8 +837,9 @@ async function render() {
       <div class="hero">
         <div class="n">${num(o.surfaced)}</div>
         <div class="t"><b>worth your time</b>
-          out of ${num(o.posts)} collected — ${(o.surfaced / (o.posts || 1) * 100).toFixed(1)}%
-          of everything the tracker saw.</div>
+          out of ${num(o.judged)} the judge has ruled on —
+          ${(o.surfaced / (o.judged || 1) * 100).toFixed(1)}% of what it read.
+          ${o.waiting ? `${num(o.waiting)} still queued.` : ''}</div>
       </div>
 
       <div class="compo">
@@ -760,19 +869,56 @@ async function render() {
     main.innerHTML = `<div class="wide"><h1>Pipeline</h1>
       <div class="lede">The same stages the scheduled run uses. Runs in the background —
         the window stays usable.</div>
-      <div class="row">${['collect','links','amplify','threads','dedup','judge','extract','digest']
+      <div class="row">${['collect','replies','suggest','links','curate','amplify',
+                          'threads','dedup','judge','extract','digest','notify']
         .map(s => `<button class="act" id="b-${s}" onclick="stage('${s}')">${s}</button>`).join('')}</div>
       <div class="log" id="log">idle</div></div>`;
     return;
   }
 
+  if (view === 'search') { return renderSearch(main); }
+
   if (view === 'surfaced') await loadLevels();
   const items = await api().feed(view, 40);
   const [title, lede] = COPY[view];
+  // Rating is the only thing the system cannot do for itself, so it is offered
+  // on every read view rather than quarantined on its own page. Nobody visits
+  // a page called "give feedback".
   main.innerHTML = `<div class="wrap"><h1>${title}</h1><div class="lede">${lede}</div>` +
     (view === 'surfaced' ? strictWidget() : '') +
-    (items.length ? items.map(it => entry(it, view === 'unrated' || view === 'nearmiss')).join('')
+    (items.length ? items.map(it => entry(it, true)).join('')
                   : `<div class="empty">nothing clears the bar right now — try lowering it</div>`) + `</div>`;
+}
+
+/* ---- search -------------------------------------------------------------- */
+let LAST_QUERY = '';
+
+async function renderSearch(main) {
+  main.innerHTML = `<div class="wrap"><h1>Search</h1>
+    <div class="lede">Everything collected, judged or not — most of the corpus never
+      reaches the judge, and it is still the best record of what was said.</div>
+    <div class="searchbar">
+      <input id="q" placeholder="a claim, a model name, a phrase…" value="${esc(LAST_QUERY)}">
+      <button class="act" onclick="doSearch()">Search</button>
+    </div>
+    <div id="results">${LAST_QUERY ? '' : '<div class="empty">meaning and wording both count — an exact string always ranks first</div>'}</div></div>`;
+  const input = document.getElementById('q');
+  input.focus();
+  input.onkeydown = (e) => { if (e.key === 'Enter') doSearch(); };
+  if (LAST_QUERY) doSearch();
+}
+
+async function doSearch() {
+  const q = document.getElementById('q').value.trim();
+  const out = document.getElementById('results');
+  if (!q) { out.innerHTML = ''; return; }
+  LAST_QUERY = q;
+  out.innerHTML = '<div class="empty busy">searching…</div>';
+  const items = await api().search(q, 40);
+  out.innerHTML = items.length
+    ? `<div class="lede">${items.length} result${items.length === 1 ? '' : 's'}</div>`
+      + items.map(it => entry(it, true)).join('')
+    : `<div class="empty">nothing matched “${esc(q)}”</div>`;
 }
 
 async function cands(by, el) {
@@ -816,7 +962,24 @@ document.querySelectorAll('nav button').forEach(b => b.onclick = () => {
   b.classList.add('on'); view = b.dataset.v; render();
 });
 
-async function boot() { const o = await api().overview(); assay(o); render(); }
+// Every failure this system has is silent — an expired session collects zero
+// posts and looks exactly like a quiet day. So the state of the machinery is
+// always on screen, not behind a command nobody runs.
+async function status() {
+  const h = await api().health();
+  document.getElementById('status').innerHTML =
+    `<h4>Status</h4>` + h.checks.map(c => `
+      <div class="chk ${c.level}" ${c.fix ? `title="${esc(c.fix)}"` : ''}>
+        <i></i><span>${esc(c.label)}</span><b>${esc(c.detail)}</b>
+      </div>`).join('');
+}
+
+async function boot() {
+  const o = await api().overview();
+  assay(o);
+  status();
+  render();
+}
 window.addEventListener('pywebviewready', boot);
 if (window.pywebview) boot();
 </script>

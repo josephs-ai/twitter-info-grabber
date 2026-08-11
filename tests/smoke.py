@@ -36,7 +36,8 @@ def test_imports() -> None:
     print("\nmodules import")
     modules = ["db", "parse", "accounts", "collect", "context", "threads",
                "embed", "novelty", "amplify", "links", "replies", "suggest",
-               "judge", "extract", "digest", "feedback", "pipeline", "cli"]
+               "judge", "extract", "digest", "feedback", "pipeline", "cli",
+               "cluster", "health", "notify", "search", "strictness", "curate"]
     for name in modules:
         try:
             importlib.import_module(f"tracker.{name}")
@@ -239,6 +240,162 @@ def test_prune_stability(tmp: Path) -> None:
     conn.close()
 
 
+def _seed_judged(conn, pid: str, days_old: int, novelty: int, value: int,
+                 handle: str = "a", text: str = "some text here", verdict: str = "skip"):
+    """A post that survived triage, plus a judgement on it."""
+    stamp = f"datetime('now', '-{days_old} days')"
+    conn.execute(
+        f"INSERT INTO posts (id, author_handle, author_name, text, created_at,"
+        f" fetched_at, is_retweet, capture_source, urls) "
+        f"VALUES (?,?,'',?,{stamp},{stamp},0,'timeline','[]')", (pid, handle, text))
+    conn.execute(
+        f"INSERT INTO triage (post_id, stage, updated_at) VALUES (?,'triaged',{stamp})",
+        (pid,))
+    if novelty:
+        conn.execute(
+            f"INSERT INTO judgements (post_id, model, prompt_version, verdict,"
+            f" novelty, value, created_at) VALUES (?,?,?,?,?,?,{stamp})",
+            (pid, judge_model(), judge_version(), verdict, novelty, value))
+
+
+def judge_model() -> str:
+    from tracker import judge
+    return judge.MODEL
+
+
+def judge_version() -> str:
+    from tracker import judge
+    return judge.PROMPT_VERSION
+
+
+def test_judge_queue(tmp: Path) -> None:
+    print("\njudge queue")
+    from tracker import db, judge
+
+    conn = db.connect(tmp / "queue.db")
+    for i in range(40):                       # fresh
+        _seed_judged(conn, f"new{i}", 1, 0, 0)
+    for i in range(40):                       # behind, but still judgeable
+        _seed_judged(conn, f"old{i}", 30, 0, 0)
+    for i in range(5):                        # scrolled-up history
+        _seed_judged(conn, f"ancient{i}", 400, 0, 0)
+    conn.commit()
+
+    retired = judge.retire_stale(conn)
+    check("posts past the window are retired", retired == 5, f"({retired})")
+    reason = conn.execute("SELECT drop_reason FROM triage WHERE post_id='ancient0'"
+                          ).fetchone()["drop_reason"]
+    check("retirement keeps a reason", reason == "stale", f"({reason})")
+
+    waiting = judge.backlog(conn)["waiting"]
+    check("backlog counts only judgeable posts", waiting == 80, f"({waiting})")
+
+    picked = judge.pending(conn, 20)
+    ages = [p["id"][:3] for p in picked]
+    check("queue is not newest-only", "old" in ages)
+    check("queue still favours fresh posts", ages.count("new") > ages.count("old"),
+          f"({ages.count('new')} new / {ages.count('old')} old)")
+    check("queue respects the limit", len(picked) == 20, f"({len(picked)})")
+    conn.close()
+
+
+def test_extract_follows_bar(tmp: Path) -> None:
+    print("\nextraction follows the strictness bar")
+    from tracker import db, extract, strictness
+
+    conn = db.connect(tmp / "ex.db")
+    _seed_judged(conn, "hi", 1, 4, 5, verdict="surface")
+    _seed_judged(conn, "mid", 1, 2, 3, verdict="skip")
+    conn.commit()
+
+    strictness.save(conn, "strict")
+    ids = {p["id"] for p in extract.pending(conn, 10)}
+    check("strict bar extracts only the top post", ids == {"hi"}, f"({ids})")
+
+    strictness.save(conn, "permissive")
+    ids = {p["id"] for p in extract.pending(conn, 10)}
+    check("loosening the bar pulls in what the feed now shows", ids == {"hi", "mid"},
+          f"({ids})")
+    conn.close()
+
+
+def test_cluster() -> None:
+    print("\nstory clustering")
+    from tracker import cluster
+
+    day = "2026-08-10T00:00:00+00:00"
+    far = "2026-06-10T00:00:00+00:00"
+    items = [
+        {"id": "1", "author_handle": "vendor", "created_at": day,
+         "headline": "Acme released Muse 30B, an open-weight model under Apache 2.0"},
+        {"id": "2", "author_handle": "runtime", "created_at": day,
+         "headline": "Muse 30B is out from Acme, open weights, Apache 2.0 licensed"},
+        {"id": "3", "author_handle": "other", "created_at": day,
+         "headline": "A study finds that sparse attention degrades long-context recall"},
+        {"id": "4", "author_handle": "late", "created_at": far,
+         "headline": "Acme released Muse 30B, an open-weight model under Apache 2.0"},
+    ]
+    groups = cluster.group(items)
+    sizes = sorted(g["size"] for g in groups)
+    check("independent reports of one story merge", sizes[-1] >= 2, f"(sizes {sizes})")
+    check("an unrelated story stays separate", len(groups) >= 2, f"({len(groups)})")
+    lead = next(g for g in groups if g["size"] >= 2)
+    check("the lead is the first-ranked member", lead["lead"]["id"] == "1")
+    check("every member is kept",
+          sum(g["size"] for g in groups) == len(items))
+    check("a repeat months later is a different story",
+          not any("late" in g["sources"] and "vendor" in g["sources"] for g in groups))
+
+
+def test_notify(tmp: Path) -> None:
+    print("\nnotification watermark")
+    from tracker import db, notify, strictness
+
+    conn = db.connect(tmp / "n.db")
+    strictness.save(conn, "strict")
+    _seed_judged(conn, "a", 1, 4, 5, handle="one", text="first finding here")
+    _seed_judged(conn, "b", 1, 4, 5, handle="two", text="second finding here")
+    conn.commit()
+
+    settings = notify.save(conn, {"desktop": False, "webhook_url": ""})
+    check("channels off by default in this test", settings["desktop"] is False)
+
+    first = notify.deliver(conn)
+    check("finds what cleared the bar", first["found"] == 2, f"({first['found']})")
+    again = notify.deliver(conn)
+    check("does not re-announce", again["found"] == 0, f"({again['found']})")
+
+    _seed_judged(conn, "c", 1, 4, 5, handle="three", text="third finding here")
+    conn.commit()
+    third = notify.deliver(conn)
+    check("announces what is genuinely new", third["found"] == 1, f"({third['found']})")
+    conn.close()
+
+
+def test_search(tmp: Path) -> None:
+    print("\nsearch")
+    from tracker import db, novelty, search
+
+    conn = db.connect(tmp / "s.db")
+    _seed_judged(conn, "p1", 1, 3, 4, text="speculative decoding doubles throughput")
+    _seed_judged(conn, "p2", 1, 3, 4, text="a recipe for sourdough bread starter")
+    # Never judged — most of the corpus is in this state, so excluding it would
+    # hide most of what search exists for.
+    _seed_judged(conn, "p3", 1, 0, 0, text="notes on speculative decoding kernels")
+    conn.commit()
+    novelty.embed_pending(conn)
+
+    rows = search.run(conn, "speculative decoding", limit=5)
+    hits = [r["id"] for r in rows]
+    check("the exact phrase is found", "p1" in hits, f"({hits})")
+    check("unrelated text is excluded", "p2" not in hits, f"({hits})")
+    check("unjudged posts are searchable", "p3" in hits, f"({hits})")
+    check("unjudged results carry no scores",
+          all(r["novelty"] is None for r in rows if r["id"] == "p3"))
+    check("an empty query returns nothing", search.run(conn, "  ") == [])
+    conn.close()
+
+
 def main() -> int:
     print(f"python {sys.version.split()[0]} on {sys.platform}")
     with tempfile.TemporaryDirectory() as td:
@@ -252,6 +409,11 @@ def main() -> int:
         test_curation(tmp)
         test_ssrf_guard()
         test_prune_stability(tmp)
+        test_judge_queue(tmp)
+        test_extract_follows_bar(tmp)
+        test_cluster()
+        test_notify(tmp)
+        test_search(tmp)
 
     print(f"\n{PASSED} passed, {len(FAILED)} failed")
     if FAILED:

@@ -13,12 +13,15 @@ from . import db
 from . import digest as digest_mod
 from . import extract as extract_mod
 from . import feedback as feedback_mod
+from . import health as health_mod
 from . import judge as judge_mod
 from . import links as links_mod
+from . import notify as notify_mod
 from . import novelty as novelty_mod
 from . import pipeline as pipeline_mod
 from . import replies as replies_mod
 from . import schedule as schedule_mod
+from . import search as search_mod
 from . import suggest as suggest_mod
 from . import threads as threads_mod
 
@@ -72,31 +75,18 @@ def cmd_stats(args) -> int:
 
 
 def cmd_doctor(args) -> int:
+    """The same checks the app's status strip shows — one implementation."""
     conn = db.connect(args.db)
     try:
-        ok = True
-        profile = collect_mod.PROFILE_DIR
-        has_profile = profile.exists() and any(profile.iterdir())
-        print(f"{'OK  ' if has_profile else 'FAIL'} browser profile: {profile}")
-        ok &= has_profile
-        if not has_profile:
-            print("       -> run: ./run login")
-
+        marks = {"ok": "OK  ", "warn": "WARN", "fail": "FAIL"}
+        checks = health_mod.report(conn)
+        for check in checks:
+            print(f"{marks[check['level']]} {check['label']}: {check['detail']}")
+            if check["fix"]:
+                print(f"       -> {check['fix']}")
         s = db.stats(conn)
-        print(f"OK   database: {args.db} ({s['posts_total']} posts)")
-
-        last = conn.execute(
-            "SELECT status, started_at, posts_new, error FROM runs ORDER BY id DESC LIMIT 1"
-        ).fetchone()
-        if last is None:
-            print("     no collection runs yet")
-        else:
-            marker = "OK  " if last["status"] == "ok" else "WARN"
-            print(f"{marker} last run: {last['status']} at {last['started_at']} "
-                  f"(+{last['posts_new']} new)")
-            if last["error"]:
-                print(f"       error: {last['error'][:120]}")
-        return 0 if ok else 1
+        print(f"OK   Database: {args.db} ({s['posts_total']} posts)")
+        return 1 if health_mod.worst(checks) == "fail" else 0
     finally:
         conn.close()
 
@@ -354,6 +344,55 @@ def cmd_extract(args) -> int:
         conn.close()
 
 
+def cmd_search(args) -> int:
+    conn = db.connect(args.db)
+    try:
+        rows = search_mod.run(conn, " ".join(args.query), limit=args.limit)
+        if not rows:
+            print("nothing matched")
+            return 0
+        for row in rows:
+            scored = (f"  [n{row['novelty']} v{row['value']}]"
+                      if row["novelty"] is not None else "  [unjudged]")
+            print(f"\n@{row['author_handle']}  {row['created_at'][:10]}{scored}")
+            print("  " + " ".join((row["text"] or "").split())[:220])
+            print(f"  https://x.com/{row['author_handle']}/status/{row['id']}")
+        print(f"\n{len(rows)} results")
+        return 0
+    finally:
+        conn.close()
+
+
+def cmd_notify(args) -> int:
+    conn = db.connect(args.db)
+    try:
+        if args.webhook is not None or args.desktop is not None:
+            settings = notify_mod.load(conn)
+            if args.webhook is not None:
+                settings["webhook_url"] = args.webhook
+            if args.desktop is not None:
+                settings["desktop"] = args.desktop == "on"
+            notify_mod.save(conn, settings)
+
+        settings = notify_mod.load(conn)
+        print(f"desktop   {'on' if settings['desktop'] else 'off'}")
+        print(f"webhook   {settings['webhook_url'] or '(none)'}")
+
+        result = notify_mod.deliver(conn, dry_run=args.dry_run)
+        print(f"\n{result['found']} undelivered")
+        if result.get("title"):
+            print(f"\n{result['title']}\n{result['body']}")
+        if result["skipped"]:
+            print(f"\nnot sent: {result['skipped']}")
+        elif result["sent"]:
+            print(f"\nsent via {', '.join(result['sent'])}")
+        elif result["found"]:
+            print("\nno channel delivered — is a notification daemon running?")
+        return 0
+    finally:
+        conn.close()
+
+
 def cmd_daily(args) -> int:
     conn = db.connect(args.db)
     try:
@@ -384,7 +423,7 @@ def cmd_schedule(args) -> int:
         s = st["settings"]
         print(f"\nenabled   {s['enabled']}")
         print(f"times     {', '.join(s['times'])}  ({s['days']})")
-        print(f"stages    {len(s['stages'])} of 10")
+        print(f"stages    {len(s['stages'])} of {len(schedule_mod.STAGE_INFO)}")
         print(f"installed {st['installed']} entries on {st['platform']}")
         print(f"command   {st['command']}")
         return 0
@@ -560,6 +599,18 @@ def main(argv=None) -> int:
     p.add_argument("--by-replies", action="store_true",
                    help="rank by reply presence instead of follow graph")
     p.set_defaults(func=cmd_candidates)
+
+    p = sub.add_parser("search", help="search everything collected, judged or not")
+    p.add_argument("query", nargs="+")
+    p.add_argument("--limit", type=int, default=20)
+    p.set_defaults(func=cmd_search)
+
+    p = sub.add_parser("notify", help="announce new findings, and configure how")
+    p.add_argument("--webhook", metavar="URL",
+                   help="POST findings here (Slack/Discord compatible); '' to clear")
+    p.add_argument("--desktop", choices=["on", "off"])
+    p.add_argument("--dry-run", action="store_true", help="show the message, send nothing")
+    p.set_defaults(func=cmd_notify)
 
     args = parser.parse_args(argv)
     return args.func(args)

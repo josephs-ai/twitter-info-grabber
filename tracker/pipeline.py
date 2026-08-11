@@ -47,8 +47,8 @@ def load_env() -> None:
 
 
 def run(conn, skip: set[str] | None = None) -> int:
-    from . import amplify, collect, curate, digest, extract, judge, links, novelty
-    from . import replies, suggest, threads
+    from . import amplify, collect, curate, digest, extract, judge, links, notify
+    from . import novelty, replies, suggest, threads
 
     load_env()
     skip = skip or set()
@@ -73,6 +73,8 @@ def run(conn, skip: set[str] | None = None) -> int:
         ("judge",    lambda: judge.run(conn, limit=60)),
         ("extract",  lambda: extract.run(conn, limit=15)),
         ("digest",   lambda: digest.build(conn)),
+        # Last, so it announces only what the rest of the run actually produced.
+        ("notify",   lambda: notify.deliver(conn)),
     ]
 
     started = time.time()

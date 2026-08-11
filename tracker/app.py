@@ -22,8 +22,12 @@ import webview
 
 from . import accounts as accounts_mod
 from . import extract as extract_mod
-from . import amplify, db, digest, feedback, novelty
+from . import judge as judge_mod
+from . import notify as notify_mod
+from . import amplify, db, digest, feedback, health, novelty
+from . import cluster as cluster_mod
 from . import curate as curate_mod
+from . import search as search_mod
 from . import schedule as schedule_mod
 from . import strictness as strict_mod
 
@@ -59,7 +63,11 @@ class Api:
                 "authors": scalar("SELECT COUNT(DISTINCT author_handle) FROM posts"),
                 "accounts": scalar("SELECT COUNT(*) FROM accounts WHERE active=1"),
                 "candidates": scalar("SELECT COUNT(*) FROM candidates WHERE status='new'"),
-                "judged": scalar("SELECT COUNT(*) FROM judgements"),
+                "judged": scalar("SELECT COUNT(DISTINCT post_id) FROM judgements"),
+                # The rate that means anything is surfaced-per-judged. Posts
+                # still queued for the judge have not been ruled on, so putting
+                # them in the denominator understates the filter by ~10x.
+                "waiting": judge_mod.backlog(conn)["waiting"],
                 # The bar is a live setting, so this must be counted against it.
                 # Reading the frozen verdict here made the hero number disagree
                 # with the feed whenever the slider moved.
@@ -90,6 +98,19 @@ class Api:
             items.append(item)
         return items
 
+    def _cluster(self, items: list[dict]) -> list[dict]:
+        """Fold repeats of one story into its lead, keeping the others attached."""
+        out = []
+        for group in cluster_mod.group(items):
+            lead = dict(group["lead"])
+            lead["also"] = [
+                {"handle": m["author_handle"], "id": m["id"],
+                 "url": m["url"], "value": m.get("value")}
+                for m in group["members"][1:]
+            ]
+            out.append(lead)
+        return out
+
     def feed(self, mode: str = "surfaced", limit: int = 40) -> list[dict]:
         """mode: surfaced | nearmiss | unrated | amplified"""
         conn = self._conn()
@@ -105,7 +126,9 @@ class Api:
                 rows = conn.execute(
                     base + f" WHERE {where} ORDER BY j.value DESC, p.amplifiers DESC LIMIT ?",
                     (*params, limit)).fetchall()
-                return self._rows_to_items(conn, rows)
+                # One story per entry. Six accounts announcing one release is
+                # corroboration, not six things to read.
+                return self._cluster(self._rows_to_items(conn, rows))
             level = strict_mod.load(conn)
             where, params = strict_mod.clause(level)
             if mode == "nearmiss":
@@ -142,6 +165,22 @@ class Api:
         conn = self._conn()
         try:
             return digest.build(conn, since_hours=999999, limit=20, write=False)
+        finally:
+            conn.close()
+
+    def health(self) -> dict:
+        conn = self._conn()
+        try:
+            checks = health.report(conn)
+            return {"checks": checks, "worst": health.worst(checks)}
+        finally:
+            conn.close()
+
+    def search(self, query: str, limit: int = 40) -> list[dict]:
+        conn = self._conn()
+        try:
+            rows = search_mod.run(conn, query, limit=limit)
+            return self._rows_to_items(conn, rows)
         finally:
             conn.close()
 
@@ -251,6 +290,41 @@ class Api:
         finally:
             conn.close()
 
+    # -- notifications ---------------------------------------------------------
+
+    def notify_status(self) -> dict:
+        conn = self._conn()
+        try:
+            return {"settings": notify_mod.load(conn),
+                    "pending": len(notify_mod.undelivered(conn, limit=50))}
+        finally:
+            conn.close()
+
+    def notify_save(self, settings: dict) -> dict:
+        conn = self._conn()
+        try:
+            return notify_mod.save(conn, settings)
+        finally:
+            conn.close()
+
+    def notify_test(self) -> dict:
+        """Send one now, whatever the watermark says — the point is to prove the
+        channel works, and a test that silently does nothing proves nothing."""
+        conn = self._conn()
+        try:
+            settings = notify_mod.load(conn)
+            title = "AI Signal test"
+            body = "If you can read this, notifications are working."
+            sent = []
+            if settings["desktop"] and notify_mod.desktop(title, body):
+                sent.append("desktop")
+            if settings["webhook_url"] and notify_mod.webhook(
+                    settings["webhook_url"], title, body):
+                sent.append("webhook")
+            return {"sent": sent}
+        finally:
+            conn.close()
+
     # -- pipeline ------------------------------------------------------------
 
     def run_stage(self, stage: str) -> dict:
@@ -260,14 +334,22 @@ class Api:
                 return {"ok": False, "error": f"{self._running} is already running"}
             self._running = stage
 
+        # Every stage the Pipeline page offers has to be here — `extract` was
+        # on the page but missing from this map, so its button returned
+        # "unknown stage".
         commands = {
             "collect": ["--all", "--scrolls", "5", "--headless"],
+            "replies": ["--limit", "4"],
+            "suggest": ["--seeds", "2"],
             "links": ["--limit", "40"],
+            "curate": ["--apply"],
             "amplify": [],
             "threads": ["--apply"],
             "dedup": ["--apply"],
             "judge": ["--limit", "30"],
+            "extract": ["--limit", "15"],
             "digest": [],
+            "notify": [],
         }
         if stage not in commands:
             self._running = None
