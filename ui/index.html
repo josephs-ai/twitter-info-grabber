@@ -83,12 +83,27 @@ nav button b {
 }
 nav button.on b { color: var(--ink); }
 
-/* --- the assay bar: this app's signature ---------------------------------- */
-.assay { border-top: 1px solid var(--rule); padding: 14px 16px 16px; }
-.assay h4 {
-  margin: 0 0 10px; font: 10px/1 var(--mono); letter-spacing: .16em;
-  text-transform: uppercase; color: var(--faint);
+/* --- rail footer: the funnel and the machinery, folded ------------------- */
+.foot { border-top: 1px solid var(--rule); }
+.foot > summary {
+  display: flex; align-items: center; gap: 8px; cursor: pointer;
+  padding: 12px 16px; list-style: none;
+  font: 11px/1.4 var(--mono); color: var(--muted); letter-spacing: .04em;
 }
+.foot > summary::-webkit-details-marker { display: none; }
+.foot > summary:hover { background: var(--raise); }
+.ratio { flex: 1; }
+.ratio b { color: var(--paper); font-weight: 500; }
+.ratio b.out { color: var(--signal); }
+.ratio i { color: var(--faint); font-style: normal; margin: 0 2px; }
+.dot {
+  width: 7px; height: 7px; border-radius: 50%; background: var(--moss);
+  flex: 0 0 auto;
+}
+.dot.warn { background: var(--signal); }
+.dot.fail { background: var(--rust); }
+.footbody { padding: 2px 16px 16px; }
+
 .stage { margin-bottom: 9px; }
 .stage .lab {
   display: flex; justify-content: space-between; align-items: baseline;
@@ -100,12 +115,7 @@ nav button.on b { color: var(--ink); }
 .stage.out .track i { background: var(--signal); }
 .stage.out .lab b { color: var(--signal); }
 
-/* --- status: the machinery, always visible -------------------------------- */
-.statusbar { border-top: 1px solid var(--rule); padding: 13px 16px 16px; }
-.statusbar h4 {
-  margin: 0 0 9px; font: 10px/1 var(--mono); letter-spacing: .16em;
-  text-transform: uppercase; color: var(--faint);
-}
+.checks { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--rule); }
 .chk {
   display: grid; grid-template-columns: 7px 1fr; gap: 7px; align-items: baseline;
   font: 10.5px/1.5 var(--mono); color: var(--muted); margin-bottom: 6px;
@@ -497,8 +507,7 @@ button.act.bad.on  { background: var(--rust); border-color: var(--rust); color: 
   <button data-v="curate">Self-curation</button>
   <button data-v="setup" id="setuplink" hidden>Setting up</button>
   </div>
-  <div class="assay" id="assay"></div>
-  <div class="statusbar" id="status"></div>
+  <details class="foot" id="foot"></details>
 </nav>
 <main id="main"><div class="empty">reading database…</div></main>
 
@@ -519,22 +528,52 @@ function when(iso) {
 }
 
 /* The funnel, always on screen: what came in and what survived each stage. */
+/* The rail carried eleven nav items, a four-bar funnel and four status lines —
+   the densest thing on screen and the part you look at least. Both now live in
+   one strip: the funnel reduced to the ratio that is the whole thesis, and the
+   machinery reduced to a single dot showing the worst of the four checks.
+   Opening it brings back every number that was there before. */
+let ASSAY = null;
+
 function assay(o) {
+  ASSAY = o;
+  paintFoot();
+}
+
+function paintFoot() {
+  const foot = document.getElementById('foot');
+  if (!foot || !ASSAY) return;
+  const o = ASSAY;
   const f = o.funnel || {};
-  const collected = o.posts || 0;
   const kept = (f.triaged || 0) + (f.judged || 0) + (f.published || 0);
   const stages = [
-    ['collected', collected, false],
+    ['collected', o.posts || 0, false],
     ['kept', kept, false],
     ['judged', o.judged || 0, false],
     ['surfaced', o.surfaced || 0, true],
   ];
   const max = Math.max(...stages.map(s => s[1]), 1);
-  document.getElementById('assay').innerHTML = `<h4>Assay</h4>` + stages.map(
-    ([label, value, out]) => `<div class="stage ${out ? 'out' : ''}">
-      <div class="lab"><span>${label}</span><b>${num(value)}</b></div>
-      <div class="track"><i style="width:${Math.max(1.5, value / max * 100)}%"></i></div>
-    </div>`).join('');
+  const checks = (HEALTH && HEALTH.checks) || [];
+  const worst = (HEALTH && HEALTH.worst) || 'ok';
+  const bad = checks.filter(c => c.level !== 'ok');
+
+  foot.innerHTML = `
+    <summary>
+      <span class="ratio"><b>${num(o.posts || 0)}</b> in <i>·</i>
+        <b class="out">${num(o.surfaced || 0)}</b> out</span>
+      <span class="dot ${worst}" title="${esc(bad.map(c => c.label).join(', ') || 'all clear')}"></span>
+    </summary>
+    <div class="footbody">
+      ${stages.map(([label, value, out]) => `
+        <div class="stage ${out ? 'out' : ''}">
+          <div class="lab"><span>${label}</span><b>${num(value)}</b></div>
+          <div class="track"><i style="width:${Math.max(1.5, value / max * 100)}%"></i></div>
+        </div>`).join('')}
+      <div class="checks">${checks.map(c => `
+        <div class="chk ${c.level}" ${c.fix ? `title="${esc(c.fix)}"` : ''}>
+          <i></i><span>${esc(c.label)}</span><b>${esc(c.detail)}</b>
+        </div>`).join('')}</div>
+    </div>`;
 }
 
 // A figure's label is a slot, not a sentence: keep it to a few words.
@@ -1313,13 +1352,11 @@ document.querySelectorAll('nav button').forEach(b => b.onclick = () => {
 // Every failure this system has is silent — an expired session collects zero
 // posts and looks exactly like a quiet day. So the state of the machinery is
 // always on screen, not behind a command nobody runs.
+let HEALTH = null;
+
 async function status() {
-  const h = await api().health();
-  document.getElementById('status').innerHTML =
-    `<h4>Status</h4>` + h.checks.map(c => `
-      <div class="chk ${c.level}" ${c.fix ? `title="${esc(c.fix)}"` : ''}>
-        <i></i><span>${esc(c.label)}</span><b>${esc(c.detail)}</b>
-      </div>`).join('');
+  HEALTH = await api().health();
+  paintFoot();
 }
 
 async function boot() {
