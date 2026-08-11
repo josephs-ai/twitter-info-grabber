@@ -51,6 +51,14 @@ def migrate(conn: sqlite3.Connection) -> None:
             "reply_count": "INTEGER NOT NULL DEFAULT 0",
             "replied_under": "TEXT",
         },
+        "reads": {
+            "archived_at": "TEXT",
+        },
+        "triage": {
+            # When a post first reached the judge's queue. Distinct from
+            # updated_at, which any later rescan overwrites.
+            "triaged_at": "TEXT",
+        },
     }
     for table, columns in wanted.items():
         existing = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}

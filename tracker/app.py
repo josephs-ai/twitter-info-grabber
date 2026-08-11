@@ -115,15 +115,30 @@ class Api:
         return out
 
     def feed(self, mode: str = "surfaced", limit: int = 40,
-             sort: str = "value") -> list[dict]:
-        """mode: surfaced | nearmiss | unrated | amplified"""
+             sort: str = "value", days: int = 14,
+             archived: bool = False) -> list[dict]:
+        """mode: surfaced | nearmiss | unrated | amplified
+
+        `days` bounds the feed to a rolling window and `archived` hides what you
+        have finished with. Without either, every view was a single unbounded
+        list ranked by score: a post from six weeks ago sat above this morning's
+        forever, and nothing you did could move it.
+        """
         conn = self._conn()
         try:
-            base = """
+            window = (" AND p.created_at > datetime('now', ?)" if days else "")
+            window_args = [f"-{days} days"] if days else []
+            # Archived is a state you chose, so it is never merely re-ranked —
+            # it leaves the feed until you ask for it.
+            shelf = (" AND p.id IN (SELECT post_id FROM reads WHERE archived_at IS NOT NULL)"
+                     if archived else
+                     " AND p.id NOT IN (SELECT post_id FROM reads WHERE archived_at IS NOT NULL)")
+            base = f"""
                 SELECT p.id, p.author_handle, p.text, p.created_at, p.amplifiers,
                        p.capture_source, p.thread_size,
                        j.verdict, j.novelty, j.value, j.category, j.rationale
                 FROM judgements j JOIN posts p ON p.id = j.post_id
+                WHERE 1=1 {window} {shelf}
             """
             if mode == "surfaced":
                 where, params = strict_mod.clause(strict_mod.load(conn))
@@ -137,8 +152,8 @@ class Api:
                                "j.value DESC"),
                 }.get(sort, "j.value DESC, p.amplifiers DESC")
                 rows = conn.execute(
-                    base + f" WHERE {where} ORDER BY {order} LIMIT ?",
-                    (*params, limit)).fetchall()
+                    base + f" AND {where} ORDER BY {order} LIMIT ?",
+                    (*window_args, *params, limit)).fetchall()
                 # One story per entry. Six accounts announcing one release is
                 # corroboration, not six things to read.
                 return self._cluster(self._rows_to_items(conn, rows))
@@ -147,16 +162,16 @@ class Api:
             if mode == "nearmiss":
                 # Below the current bar but within one point of it — move the
                 # slider and what counts as a near miss moves with it.
-                sql = base + (f" WHERE NOT ({where}) AND j.value >= ? "
+                sql = base + (f" AND NOT ({where}) AND j.value >= ? "
                               "ORDER BY j.value DESC, j.novelty DESC")
-                args = [*params, max(1, level["value"] - 1)]
+                args = [*window_args, *params, max(1, level["value"] - 1)]
             elif mode == "unrated":
-                sql = base + (f" WHERE j.post_id NOT IN (SELECT post_id FROM feedback) "
+                sql = base + (f" AND j.post_id NOT IN (SELECT post_id FROM feedback) "
                               f"AND (({where}) OR j.value >= ?) ORDER BY j.value DESC")
-                args = [*params, max(1, level["value"] - 1)]
+                args = [*window_args, *params, max(1, level["value"] - 1)]
             else:  # amplified
-                sql = base + " WHERE p.amplifiers >= 2 ORDER BY p.amplifiers DESC"
-                args = []
+                sql = base + " AND p.amplifiers >= 2 ORDER BY p.amplifiers DESC"
+                args = [*window_args]
             rows = conn.execute(sql + " LIMIT ?", (*args, limit)).fetchall()
             return self._rows_to_items(conn, rows)
         finally:
@@ -228,6 +243,40 @@ class Api:
                 "ON CONFLICT(post_id) DO NOTHING", [(i, stamp) for i in ids])
             conn.commit()
             return len(ids)
+        finally:
+            conn.close()
+
+    def archive(self, ids: list[str], undo: bool = False) -> int:
+        """Put stories on the shelf. Nothing is deleted, as everywhere else."""
+        if not ids:
+            return 0
+        conn = self._conn()
+        try:
+            stamp = None if undo else db.now()
+            conn.executemany(
+                "INSERT INTO reads (post_id, seen_at, archived_at) VALUES (?,?,?) "
+                "ON CONFLICT(post_id) DO UPDATE SET archived_at=excluded.archived_at",
+                [(i, db.now(), stamp) for i in ids])
+            conn.commit()
+            return len(ids)
+        finally:
+            conn.close()
+
+    def archive_older_than(self, days: int, mode: str = "surfaced") -> int:
+        """Clear out the back of a feed in one action."""
+        conn = self._conn()
+        try:
+            rows = conn.execute(
+                "SELECT DISTINCT j.post_id FROM judgements j "
+                "JOIN posts p ON p.id = j.post_id "
+                "WHERE p.created_at < datetime('now', ?)", (f"-{days} days",)).fetchall()
+            stamp = db.now()
+            conn.executemany(
+                "INSERT INTO reads (post_id, seen_at, archived_at) VALUES (?,?,?) "
+                "ON CONFLICT(post_id) DO UPDATE SET archived_at=excluded.archived_at",
+                [(r["post_id"], stamp, stamp) for r in rows])
+            conn.commit()
+            return len(rows)
         finally:
             conn.close()
 

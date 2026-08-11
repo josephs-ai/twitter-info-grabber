@@ -250,8 +250,8 @@ def _seed_judged(conn, pid: str, days_old: int, novelty: int, value: int,
         f" fetched_at, is_retweet, capture_source, urls) "
         f"VALUES (?,?,'',?,{stamp},{stamp},0,'timeline','[]')", (pid, handle, text))
     conn.execute(
-        f"INSERT INTO triage (post_id, stage, updated_at) VALUES (?,'triaged',{stamp})",
-        (pid,))
+        f"INSERT INTO triage (post_id, stage, updated_at, triaged_at) "
+        f"VALUES (?,'triaged',{stamp},{stamp})", (pid,))
     if novelty:
         conn.execute(
             f"INSERT INTO judgements (post_id, model, prompt_version, verdict,"
@@ -468,6 +468,72 @@ def test_digest_clusters(tmp: Path) -> None:
     conn.close()
 
 
+def test_arrival_rate(tmp: Path) -> None:
+    print("\narrival rate")
+    from tracker import db, schedule
+
+    conn = db.connect(tmp / "arr.db")
+    for i in range(20):
+        _seed_judged(conn, f"a{i}", 2, 0, 0)
+    conn.execute("UPDATE triage SET triaged_at = datetime('now', '-2 days')")
+    conn.commit()
+
+    before = schedule._throughput(conn, {"times": ["07:00"], "judge_limit": 60,
+                                         "days": "everyday"})["arriving_per_day"]
+    # A rescan rewrites updated_at for the whole backlog. Reading that as
+    # arrivals is what produced a fictional "186 a day".
+    conn.execute("UPDATE triage SET updated_at = datetime('now')")
+    conn.commit()
+    after = schedule._throughput(conn, {"times": ["07:00"], "judge_limit": 60,
+                                        "days": "everyday"})["arriving_per_day"]
+    check("a rescan does not inflate the arrival rate", before == after,
+          f"({before} then {after})")
+
+    fresh = db.connect(tmp / "arr2.db")
+    none_yet = schedule._throughput(fresh, {"times": ["07:00"], "judge_limit": 60,
+                                            "days": "everyday"})
+    check("no measurements reports unknown, not 'keeping up'",
+          none_yet["keeping_up"] is None and none_yet["arriving_per_day"] is None)
+    fresh.close()
+    conn.close()
+
+
+def test_feed_window(tmp: Path) -> None:
+    print("\nfeed window and archive")
+    from tracker import db, strictness
+    from tracker.app import Api
+
+    path = tmp / "feed.db"
+    conn = db.connect(path)
+    strictness.save(conn, "strict")
+    _seed_judged(conn, "fresh", 1, 4, 5, handle="a", text="a finding from today")
+    _seed_judged(conn, "old", 30, 4, 5, handle="b", text="a finding from last month")
+    conn.commit()
+    conn.close()
+
+    api = Api()
+    api._conn = lambda: db.connect(path)
+
+    check("a short window hides old posts",
+          {i["id"] for i in api.feed("surfaced", 20, "new", 7)} == {"fresh"})
+    check("a long window shows both",
+          {i["id"] for i in api.feed("surfaced", 20, "new", 0)} == {"fresh", "old"})
+
+    api.archive(["old"])
+    check("archived posts leave the feed",
+          {i["id"] for i in api.feed("surfaced", 20, "new", 0)} == {"fresh"})
+    check("and are findable on the shelf",
+          {i["id"] for i in api.feed("surfaced", 20, "new", 0, True)} == {"old"})
+    api.archive(["old"], undo=True)
+    check("restoring puts them back",
+          {i["id"] for i in api.feed("surfaced", 20, "new", 0)} == {"fresh", "old"})
+
+    n = api.archive_older_than(7)
+    check("bulk archive clears the back of the feed", n == 1, f"({n})")
+    check("and leaves the front alone",
+          {i["id"] for i in api.feed("surfaced", 20, "new", 0)} == {"fresh"})
+
+
 def test_paths() -> None:
     print("\npaths")
     import os
@@ -534,6 +600,8 @@ def main() -> int:
         test_search(tmp)
         test_read_state(tmp)
         test_throughput(tmp)
+        test_arrival_rate(tmp)
+        test_feed_window(tmp)
         test_digest_clusters(tmp)
         test_paths()
         test_onboarding(tmp)

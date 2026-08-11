@@ -212,6 +212,24 @@ h1 {
   color: var(--ink); background: var(--signal); padding: 1px 6px;
   border-radius: 3px; font-weight: 600;
 }
+/* --- day sections --------------------------------------------------------- */
+.day { border-top: 1px solid var(--rule); }
+.day:first-of-type { border-top: 0; }
+.day > summary {
+  display: flex; align-items: baseline; gap: 12px; cursor: pointer;
+  padding: 13px 0; list-style: none;
+  font: 11px/1 var(--mono); letter-spacing: .12em; text-transform: uppercase;
+  color: var(--faint);
+}
+.day > summary::-webkit-details-marker { display: none; }
+.day > summary::before { content: "+"; width: 9px; color: var(--faint); }
+.day[open] > summary::before { content: "–"; }
+.day > summary b { color: var(--paper); font-weight: 500; letter-spacing: .1em; }
+.day > summary i { margin-left: auto; font-style: normal; color: var(--faint); }
+.day > summary i:hover { color: var(--signal); text-decoration: underline; }
+.day > summary:hover b { color: var(--signal); }
+.day[open] > summary { border-bottom: 1px solid var(--rule); margin-bottom: 8px; }
+
 .sorts { display: flex; gap: 8px; margin-bottom: 22px; flex-wrap: wrap; }
 .sorts .act.on { border-color: var(--signal); color: var(--signal); }
 .sorts .act:last-child { margin-left: auto; }
@@ -527,8 +545,19 @@ function entry(it, rateable) {
         <button class="act bad ${it.rating === 'bad' ? 'on' : ''}"
           onclick="rate('${it.id}','bad',this)">Not useful</button>` : ''}
       <button class="act" onclick="ext('${it.url}')">Open on X</button>
+      <button class="act" onclick="archiveOne('${it.id}',this)">${
+        ARCHIVED ? 'Restore' : 'Archive'}</button>
     </div>
   </div>`;
+}
+
+async function archiveOne(id, el) {
+  await api().archive([id], ARCHIVED);
+  const entryEl = el.closest('.entry');
+  const day = entryEl.closest('.day');
+  entryEl.remove();
+  // Fold the day away with its last story rather than leaving an empty header.
+  if (day && !day.querySelector('.entry')) day.remove();
 }
 
 async function rate(id, verdict, el) {
@@ -591,13 +620,15 @@ async function renderSchedule(wrap) {
       <label>How much it gets through</label>
       <div class="hint">Judging is the metered stage. Set below what arrives and
         the queue grows every day — which is invisible until it is months deep.</div>
-      <div class="banner ${st.throughput.keeping_up ? '' : 'warn'}">
+      <div class="banner ${st.throughput.keeping_up === false ? 'warn' : ''}">
         <b>${num(st.throughput.judged_per_day)} posts a day</b> at this schedule,
-        against <b>${num(st.throughput.arriving_per_day)}</b> arriving.
-        ${st.throughput.keeping_up
-          ? 'Keeping up.'
-          : `Falling behind — ${num(st.throughput.waiting)} already waiting.`}
-        Roughly <b>$${st.throughput.cost_per_day.toFixed(2)}</b> a day.
+        roughly <b>$${st.throughput.cost_per_day.toFixed(2)}</b> a day.
+        ${st.throughput.keeping_up === null
+          ? 'Not enough runs yet to say what arrives.'
+          : `Against <b>${num(st.throughput.arriving_per_day)}</b> arriving — ` +
+            (st.throughput.keeping_up ? 'keeping up.' : 'falling behind.')}
+        ${st.throughput.waiting
+          ? `${num(st.throughput.waiting)} waiting.` : ''}
       </div>
       <div class="times">
         <span class="hint">posts judged per run</span>
@@ -936,16 +967,100 @@ async function render() {
   if (view === 'search') { return renderSearch(main); }
 
   if (view === 'surfaced') await loadLevels();
-  const items = await api().feed(view, 40, SORT);
+  const items = await api().feed(view, 60, SORT, WINDOW, ARCHIVED);
   const [title, lede] = COPY[view];
   // Rating is the only thing the system cannot do for itself, so it is offered
   // on every read view rather than quarantined on its own page. Nobody visits
   // a page called "give feedback".
   main.innerHTML = `<div class="wrap"><h1>${title}</h1><div class="lede">${lede}</div>` +
-    (view === 'surfaced' ? strictWidget() + sortWidget() : '') +
-    (items.length ? items.map(it => entry(it, true)).join('')
-                  : `<div class="empty">nothing clears the bar right now — try lowering it</div>`) + `</div>`;
+    (view === 'surfaced' ? strictWidget() : '') +
+    windowWidget() +
+    (view === 'surfaced' ? sortWidget() : '') +
+    (items.length ? groupByDay(items)
+                  : `<div class="empty">${ARCHIVED
+                      ? 'nothing archived in this window'
+                      : 'nothing here in this window — widen it, or lower the bar'}</div>`) +
+    `</div>`;
   markSeenSoon(items);
+}
+
+/* ---- time ---------------------------------------------------------------- */
+// A feed with no sense of time is a pile. These two controls are what turn it
+// back into something you finish: a window that bounds what is on screen, and
+// an archive for what you are done with. Nothing is deleted either way.
+let WINDOW = 14;
+let ARCHIVED = false;
+
+const WINDOWS = [[2, '48 hours'], [7, 'Week'], [14, 'Fortnight'],
+                 [60, 'Two months'], [0, 'Everything']];
+
+function windowWidget() {
+  return `<div class="sorts">${WINDOWS.map(([d, label]) =>
+    `<button class="act ${WINDOW === d ? 'on' : ''}" onclick="setWindow(${d})">${label}</button>`
+  ).join('')}
+  <button class="act ${ARCHIVED ? 'on' : ''}" onclick="toggleArchived()">${
+    ARCHIVED ? 'Back to inbox' : 'Archived'}</button>
+  ${ARCHIVED ? '' : `<button class="act" onclick="clearOld()">Archive older than a week</button>`}
+  </div>`;
+}
+function setWindow(d) { WINDOW = d; render(); }
+function toggleArchived() { ARCHIVED = !ARCHIVED; render(); }
+async function clearOld() {
+  const n = await api().archive_older_than(7, view);
+  render();
+  refreshUnread();
+}
+
+// Timestamps are stored in UTC; days are lived in local time. Bucketing on the
+// raw ISO prefix while labelling in local time produced two sections both
+// called "Yesterday" — one for each side of midnight UTC.
+function dayKey(iso) {
+  const d = new Date(iso);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${
+    String(d.getDate()).padStart(2, '0')}`;
+}
+
+function dayLabel(iso) {
+  const key = dayKey(iso), now = new Date();
+  const today = dayKey(now.toISOString());
+  const yesterday = dayKey(new Date(now - 86400000).toISOString());
+  if (key === today) return 'Today';
+  if (key === yesterday) return 'Yesterday';
+  const d = new Date(iso);
+  if (now - d < 7 * 86400000) return d.toLocaleDateString(undefined, { weekday: 'long' });
+  return d.toLocaleDateString(undefined, { day: 'numeric', month: 'long' });
+}
+
+// Older days arrive collapsed. Today is what you came for; the rest is there
+// if you want it, and shows its count so you know what you are folding away.
+function groupByDay(items) {
+  // Bucket rather than run-length group: the feed may be ranked by value, in
+  // which case days interleave and consecutive grouping would produce a dozen
+  // one-item sections for the same afternoon. Ranking is preserved inside each
+  // day; the days themselves always run newest first.
+  const buckets = new Map();
+  for (const it of items) {
+    const key = dayKey(it.created_at);
+    if (!buckets.has(key)) buckets.set(key, []);
+    buckets.get(key).push(it);
+  }
+  const groups = [...buckets.entries()]
+    .sort((a, b) => b[0].localeCompare(a[0]))
+    .map(([key, list]) => ({ key, label: dayLabel(list[0].created_at), items: list }));
+  return groups.map((g, i) => `
+    <details class="day" ${i === 0 ? 'open' : ''}>
+      <summary><b>${esc(g.label)}</b><span>${g.items.length} ${
+        g.items.length === 1 ? 'story' : 'stories'}</span>
+        <i onclick="event.preventDefault();archiveDay(${JSON.stringify(
+          g.items.map(x => x.id)).replace(/"/g, '&quot;')})">${
+        ARCHIVED ? 'restore' : 'archive'}</i></summary>
+      ${g.items.map(it => entry(it, true)).join('')}
+    </details>`).join('');
+}
+
+async function archiveDay(ids) {
+  await api().archive(ids, ARCHIVED);
+  render();
 }
 
 /* ---- first run ----------------------------------------------------------- */

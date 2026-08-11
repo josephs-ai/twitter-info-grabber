@@ -189,6 +189,7 @@ CREATE INDEX IF NOT EXISTS idx_extractions_ver  ON extractions(prompt_version);
 -- property of your reading, not of the post, so it lives in its own table
 -- rather than as a column on posts.
 CREATE TABLE IF NOT EXISTS reads (
-    post_id TEXT PRIMARY KEY REFERENCES posts(id),
-    seen_at TEXT NOT NULL
+    post_id     TEXT PRIMARY KEY REFERENCES posts(id),
+    seen_at     TEXT NOT NULL,
+    archived_at TEXT              -- set once you are done with it
 );

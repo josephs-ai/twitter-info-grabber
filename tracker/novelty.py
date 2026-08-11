@@ -250,10 +250,15 @@ def scan(conn, window_days: int = WINDOW_DAYS, k: int = 8,
                     "max_similarity=?, nearest_post_id=?, updated_at=? WHERE post_id=?",
                     (best, nearest, db.now(), post["id"]))
             else:
+                # triaged_at is set once and never rewritten; updated_at moves
+                # on every pass, which made it useless for measuring arrival
+                # rate — a rescan restamped the whole backlog to today and the
+                # Schedule page read that as "186 posts a day arriving".
                 conn.execute(
                     "UPDATE triage SET stage='triaged', max_similarity=?, "
-                    "nearest_post_id=?, updated_at=? WHERE post_id=?",
-                    (best, nearest, db.now(), post["id"]))
+                    "nearest_post_id=?, updated_at=?, "
+                    "triaged_at=COALESCE(triaged_at, ?) WHERE post_id=?",
+                    (best, nearest, db.now(), db.now(), post["id"]))
 
     if apply:
         conn.commit()

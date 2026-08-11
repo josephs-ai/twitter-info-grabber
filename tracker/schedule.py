@@ -223,14 +223,27 @@ def _throughput(conn, settings: dict) -> dict:
     limit = int(settings.get("judge_limit", 60))
     per_day = runs * limit
 
-    arriving = conn.execute(
-        "SELECT COUNT(*) n FROM triage WHERE stage='triaged' "
-        "AND updated_at > datetime('now', '-7 days')").fetchone()["n"] / 7.0
+    # Measured on triaged_at, which is written once. Reading updated_at here
+    # counted the whole backlog as if it had arrived this week.
+    days = conn.execute(
+        "SELECT COUNT(DISTINCT date(triaged_at)) d FROM triage "
+        "WHERE triaged_at > datetime('now', '-7 days')").fetchone()["d"] or 0
+    if days:
+        arrived = conn.execute(
+            "SELECT COUNT(*) n FROM triage WHERE stage='triaged' "
+            "AND triaged_at > datetime('now', '-7 days')").fetchone()["n"]
+        arriving = arrived / days
+    else:
+        # Nothing has been triaged since the column existed. Saying "0 arriving"
+        # would claim the schedule keeps up on no evidence at all.
+        arriving = None
     waiting = judge_mod.backlog(conn)["waiting"]
     return {
         "judged_per_day": round(per_day),
-        "arriving_per_day": round(arriving),
-        "keeping_up": per_day >= arriving,
+        "arriving_per_day": round(arriving) if arriving is not None else None,
+        # None, not True: "keeping up" on no measurements is a guess dressed as
+        # a fact, and this number decides what you spend.
+        "keeping_up": (per_day >= arriving) if arriving is not None else None,
         "waiting": waiting,
         "cost_per_day": round(per_day * COST_PER_POST, 2),
     }
