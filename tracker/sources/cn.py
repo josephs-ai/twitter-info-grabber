@@ -402,11 +402,17 @@ def fetch_weibo(conn, limit: int = 40, headless: bool = True,
                     headless=headless, mobile=True)[:limit]
 
 
-# Verified against the live site: the personalised home feed of a fresh account
-# returns hiking, dating advice and travel — Xiaohongshu is a lifestyle
-# platform, and the AI content has to be asked for. Searching these returned 79
-# notes on LLMs, agent development and local deployment in one pass.
-XHS_KEYWORDS = ["大模型", "AI Agent", "AI编程", "开源模型", "提示词"]
+# Searching these does return AI content — LLMs, agent development, local
+# deployment — and the judge then scored 90 of them at a mean value of 1.07 out
+# of 5, with none clearing the bar. Searching a mass-market platform finds
+# mass-market writing: "deploy a model on your PC from zero", "7 AI concepts in
+# one diagram", interview-prep guides. Real content, no news in it.
+#
+# So the search path is off by default. It costs roughly $0.23 per hundred
+# posts to rediscover this. Pass keywords explicitly to turn it back on; the
+# profile path stays, because a specific person worth reading is a different
+# proposition from a keyword.
+XHS_KEYWORDS: list[str] = []
 
 
 def fetch_xhs(conn, limit: int = 40, headless: bool = True,
@@ -415,10 +421,12 @@ def fetch_xhs(conn, limit: int = 40, headless: bool = True,
 
     urls = [f"https://www.xiaohongshu.com/user/profile/{i}"
             for i in _targets(conn, "xhs")]
-    # Search rather than the home feed, which is personalised to an account
-    # that by design has no history and no interests.
+    # Never the personalised home feed: on a fresh account it returns hiking,
+    # dating advice and travel.
     urls += ["https://www.xiaohongshu.com/search_result?keyword="
              + urllib.parse.quote(k) for k in (keywords or XHS_KEYWORDS)]
+    if not urls:
+        return []
     return _harvest(urls, XHS_PROFILE, XHS_ENDPOINTS, walk_xhs,
                     headless=headless)[:limit]
 

@@ -67,6 +67,28 @@ def cmd_stats(args) -> int:
         print(f"date range       {s['oldest'] or '-'}  ->  {s['newest'] or '-'}")
         print(f"collection runs  {s['runs']} (last: {s['last_run'] or '-'})")
 
+        # Yield per source, because a source that collects a lot and surfaces
+        # nothing is not neutral — every post it adds is money at the judge.
+        # Xiaohongshu was 90 judged, 0 surfaced, mean value 1.07 before anyone
+        # thought to ask.
+        yields = conn.execute(
+            """
+            SELECT p.platform,
+                   COUNT(DISTINCT p.id) collected,
+                   COUNT(DISTINCT j.post_id) judged,
+                   SUM(CASE WHEN j.novelty >= 3 AND j.value >= 4 THEN 1 ELSE 0 END) surfaced,
+                   AVG(j.value) mean_value
+            FROM posts p LEFT JOIN judgements j ON j.post_id = p.id
+            GROUP BY p.platform ORDER BY collected DESC
+            """).fetchall()
+        if len(yields) > 1:
+            print("\nyield by source:")
+            print(f"  {'source':<9} {'collected':>9} {'judged':>7} {'surfaced':>9} {'mean':>6}")
+            for r in yields:
+                mean = f"{r['mean_value']:.2f}" if r["mean_value"] else "-"
+                print(f"  {r['platform']:<9} {r['collected']:>9} {r['judged']:>7} "
+                      f"{r['surfaced'] or 0:>9} {mean:>6}")
+
         rows = conn.execute(
             "SELECT author_handle, COUNT(*) n FROM posts WHERE capture_source='timeline' "
             "GROUP BY author_handle ORDER BY n DESC LIMIT 10"
