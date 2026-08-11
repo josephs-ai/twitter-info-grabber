@@ -70,6 +70,7 @@ nav button {
   color: var(--muted); text-align: left; padding: 6px 8px; border-radius: 4px;
   font: 12.5px/1.5 var(--sans);
 }
+nav button[hidden] { display: none; }   /* display:block above outranks [hidden] */
 nav button:hover { color: var(--paper); background: var(--raise); }
 nav button.on { color: var(--ink); background: var(--signal); font-weight: 600; }
 nav button:focus-visible { outline: 2px solid var(--signal); outline-offset: 1px; }
@@ -124,7 +125,12 @@ nav button.on b { color: var(--ink); }
 /* --- content ------------------------------------------------------------- */
 main { overflow-y: auto; padding: 30px 40px 80px; }
 .wrap, .wide { margin: 0 auto; }
-.wrap { max-width: 66ch; }
+.wrap { max-width: 70ch; }
+/* Controls are laid out on the content column but must never wrap onto a
+   second line — that was the shape the old three-row stack took. */
+.toolbar { flex-wrap: nowrap; }
+.toolbar .ctl > span { flex: 0 0 auto; }
+.ctl select { max-width: 15ch; text-overflow: ellipsis; }
 .wide-data { max-width: 940px; }          /* prose beyond this is unreadable */
 .wide { max-width: 900px; }
 h1 {
@@ -265,6 +271,52 @@ code {
 .searchbar input:focus {
   outline: none; border-color: var(--signal);
 }
+
+/* --- toolbar -------------------------------------------------------------- */
+/* Controls sit on one line and stay quiet: they are how you adjust the view,
+   not what the page is about. Each select carries its current value as its
+   label, so nothing has to be highlighted to be legible. */
+.toolbar {
+  display: flex; align-items: center; gap: 8px;
+  margin-bottom: 8px;
+}
+.toolbar .spacer { flex: 1 1 auto; }
+.ctl { display: inline-flex; align-items: center; gap: 6px; }
+.ctl > span {
+  font: 10px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase;
+  color: var(--faint);
+}
+.ctl select, .toolbar .ghost {
+  appearance: none; background: var(--panel); color: var(--paper);
+  border: 1px solid var(--rule); border-radius: 5px;
+  padding: 4px 8px; font: 12px/1.4 var(--sans); cursor: pointer;
+}
+.ctl select:hover, .toolbar .ghost:hover { border-color: var(--muted); }
+.ctl select:focus-visible, .toolbar .ghost:focus-visible {
+  outline: 2px solid var(--signal); outline-offset: 1px;
+}
+.toolbar .ghost.on { border-color: var(--signal); color: var(--signal); }
+.barnote {
+  font-size: 12.5px; color: var(--faint);
+  margin: 0 0 20px; padding-bottom: 16px;
+  border-bottom: 1px solid var(--rule);
+}
+
+/* the overflow menu keeps rare, destructive-sounding actions out of the way */
+.menu { position: relative; }
+.menu .pop {
+  display: none; position: absolute; right: 0; top: calc(100% + 5px); z-index: 20;
+  background: var(--panel); border: 1px solid var(--rule); border-radius: 6px;
+  padding: 4px; min-width: 210px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, .28);
+}
+.menu.open .pop { display: block; }
+.menu .pop button {
+  display: block; width: 100%; text-align: left; background: none; border: 0;
+  color: var(--paper); padding: 7px 10px; border-radius: 4px; cursor: pointer;
+  font: 12.5px/1.4 var(--sans);
+}
+.menu .pop button:hover { background: var(--raise); }
 
 /* --- strictness control -------------------------------------------------- */
 .bar-tool {
@@ -851,33 +903,55 @@ async function curUndo()  { await api().curate_undo();  render(); }
 /* ---- strictness slider --------------------------------------------------- */
 let LEVELS = [], LEVEL_I = 0;
 
-function strictWidget() {
-  const cur = LEVELS[LEVEL_I] || {};
-  return `<div class="bar-tool">
-    <div class="bar-head">
-      <span class="lbl">How high the bar sits</span>
-      <span class="cnt" id="scount">${num(cur.count || 0)} of ${num(LEVELS.length ? LEVELS[0].count : 0)} judged</span>
-    </div>
-    <div class="bar-head"><span class="now" id="sname">${esc(cur.label || '')}</span></div>
-    <div class="bar-note" id="snote">${esc(cur.note || '')}</div>
-    <input type="range" class="slider" min="0" max="${LEVELS.length - 1}" step="1"
-           value="${LEVEL_I}" aria-label="Strictness"
-           oninput="strictPreview(this.value)" onchange="strictApply(this.value)">
-    <div class="ticks">${LEVELS.map((l, i) =>
-      `<span class="${i === LEVEL_I ? 'on' : ''}" onclick="strictApply(${i})">${esc(l.label)}</span>`).join('')}</div>
-  </div>`;
-}
+/* One row instead of eleven buttons in three.
+   The controls had grown by accretion — a strictness card, six window buttons,
+   three sort buttons and two archive actions — so a page about reading opened
+   with a control panel and you scrolled to reach the first post. Selects say
+   the same things in a fifth of the space, and each one shows its current
+   value as its label, which the button rows could only do by highlighting. */
+function toolbar(view) {
+  const bar = view === 'surfaced' ? `
+    <label class="ctl">
+      <span>Bar</span>
+      <select onchange="strictApply(this.value)">
+        ${LEVELS.map((l, i) => `<option value="${i}" ${i === LEVEL_I ? 'selected' : ''}
+          >${esc(l.label)} · ${num(l.count || 0)}</option>`).join('')}
+      </select>
+    </label>` : '';
 
-/* Dragging only re-reads stored scores, so the count updates instantly and
-   nothing is written until the user lets go. */
-function strictPreview(i) {
-  const l = LEVELS[+i]; if (!l) return;
-  document.getElementById('sname').textContent = l.label;
-  document.getElementById('snote').textContent = l.note;
-  document.getElementById('scount').textContent =
-    `${num(l.count)} of ${num(LEVELS[0].count)} judged`;
-  document.querySelectorAll('.ticks span').forEach((t, n) =>
-    t.classList.toggle('on', n === +i));
+  const sort = view === 'surfaced' ? `
+    <label class="ctl">
+      <span>Sort</span>
+      <select onchange="setSort(this.value)">
+        ${SORTS.map(([k, label]) => `<option value="${k}" ${SORT === k ? 'selected' : ''}
+          >${label}</option>`).join('')}
+      </select>
+    </label>` : '';
+
+  return `<div class="toolbar">
+    ${bar}
+    <label class="ctl">
+      <span>Since</span>
+      <select onchange="setWindow(+this.value)">
+        ${WINDOWS.map(([d, label]) => `<option value="${d}" ${WINDOW === d ? 'selected' : ''}
+          >${label}</option>`).join('')}
+      </select>
+    </label>
+    ${sort}
+    <div class="spacer"></div>
+    <button class="ghost ${ARCHIVED ? 'on' : ''}" onclick="toggleArchived()"
+      >${ARCHIVED ? 'Back to inbox' : 'Archived'}</button>
+    <div class="menu">
+      <button class="ghost" onclick="this.parentElement.classList.toggle('open')"
+              aria-label="More actions">···</button>
+      <div class="pop">
+        <button onclick="clearOld()">Archive older than a week</button>
+        <button onclick="unreadAll()">Mark all unread</button>
+      </div>
+    </div>
+  </div>
+  ${view === 'surfaced' ? `<div class="barnote" id="snote">${
+    esc((LEVELS[LEVEL_I] || {}).note || '')}</div>` : ''}`;
 }
 
 async function strictApply(i) {
@@ -966,6 +1040,21 @@ async function render() {
   if (view === 'setup') { return renderSetup(main); }
   if (view === 'search') { return renderSearch(main); }
 
+  // Candidates was in the nav with no branch here, so clicking it fell through
+  // to the feed path, found no COPY entry, and threw on the destructure. The
+  // renderer for its list existed the whole time and nothing called it.
+  if (view === 'candidates') {
+    main.innerHTML = `<div class="wrap"><h1>Candidates</h1>
+      <div class="lede">Accounts discovered by who your tracked accounts follow,
+        and by who turns up replying under their posts.</div>
+      <div class="tabs">
+        <button class="act on" onclick="cands('follows', this)">By followers</button>
+        <button class="act" onclick="cands('replies', this)">By replies</button>
+      </div>
+      <div id="cl"><div class="empty">loading…</div></div></div>`;
+    return cands('follows');
+  }
+
   if (view === 'surfaced') await loadLevels();
   const items = await api().feed(view, 60, SORT, WINDOW, ARCHIVED);
   const [title, lede] = COPY[view];
@@ -973,9 +1062,7 @@ async function render() {
   // on every read view rather than quarantined on its own page. Nobody visits
   // a page called "give feedback".
   main.innerHTML = `<div class="wrap"><h1>${title}</h1><div class="lede">${lede}</div>` +
-    (view === 'surfaced' ? strictWidget() : '') +
-    windowWidget() +
-    (view === 'surfaced' ? sortWidget() : '') +
+    toolbar(view) +
     (items.length ? groupByDay(items)
                   : `<div class="empty">${ARCHIVED
                       ? 'nothing archived in this window'
@@ -994,15 +1081,6 @@ let ARCHIVED = false;
 const WINDOWS = [[2, '48 hours'], [7, 'Week'], [14, 'Fortnight'],
                  [60, 'Two months'], [0, 'Everything']];
 
-function windowWidget() {
-  return `<div class="sorts">${WINDOWS.map(([d, label]) =>
-    `<button class="act ${WINDOW === d ? 'on' : ''}" onclick="setWindow(${d})">${label}</button>`
-  ).join('')}
-  <button class="act ${ARCHIVED ? 'on' : ''}" onclick="toggleArchived()">${
-    ARCHIVED ? 'Back to inbox' : 'Archived'}</button>
-  ${ARCHIVED ? '' : `<button class="act" onclick="clearOld()">Archive older than a week</button>`}
-  </div>`;
-}
 function setWindow(d) { WINDOW = d; render(); }
 function toggleArchived() { ARCHIVED = !ARCHIVED; render(); }
 async function clearOld() {
@@ -1124,12 +1202,6 @@ let SEEN_TIMER = null;
 
 const SORTS = [['value', 'Most valuable'], ['new', 'Newest'], ['unread', 'Unread first']];
 
-function sortWidget() {
-  return `<div class="sorts">${SORTS.map(([k, label]) =>
-    `<button class="act ${SORT === k ? 'on' : ''}" onclick="setSort('${k}')">${label}</button>`
-  ).join('')}<button class="act" onclick="unreadAll()"
-      title="clear read state">Mark all unread</button></div>`;
-}
 function setSort(k) { SORT = k; render(); }
 async function unreadAll() { await api().mark_all_unseen(); render(); refreshUnread(); }
 
@@ -1226,6 +1298,12 @@ window.onStageDone = (p) => {
   // the stage that just finished is the one that unblocks it.
   if (view === 'setup') setTimeout(render, 400);
 };
+
+document.addEventListener('click', (e) => {
+  document.querySelectorAll('.menu.open').forEach(m => {
+    if (!m.contains(e.target)) m.classList.remove('open');
+  });
+});
 
 document.querySelectorAll('nav button').forEach(b => b.onclick = () => {
   document.querySelectorAll('nav button').forEach(x => x.classList.remove('on'));
