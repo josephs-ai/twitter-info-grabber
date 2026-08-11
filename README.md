@@ -34,8 +34,12 @@ account, never your own. Realistic worst case is that account getting
 suspended. Collection is deliberately slow and low-volume, which helps, but the
 risk is yours.
 
-**It needs an Anthropic API key.** Roughly **$5/month** at ~70 judgements a day.
-The system prompt is cached, so most calls cost a fraction of a cent.
+**It needs an Anthropic API key.** Judging costs about **$0.0025 a post**, and
+you set how many it does — the Schedule page shows the rate, what it costs a
+day, and whether it keeps up with what collection brings in. Around **$5/month**
+at 70 posts a day; tracking 60 accounts properly is closer to 200 a day and
+**$15/month**. The system prompt is cached, so most calls cost a fraction of a
+cent.
 
 **It is not useful on day one.** Novelty is measured against your own corpus, so
 until there is a corpus, everything looks new. Give it two or three days of
@@ -296,13 +300,20 @@ SQLite file occasionally to reclaim the space on disk.
 to cron or Task Scheduler. Entries carry a marker and only marked lines are ever
 touched, so it never disturbs anything else in your crontab.
 
-**The judge queue.** Collection outruns the per-run judging limit on a busy day.
+**The judge queue.** This is the one dial worth understanding. Judging is
+metered per post, so how many a run gets through is both a quality decision and
+a cost decision — and if you set it below what collection brings in, the queue
+grows every day, which is invisible until it is months deep. The Schedule page
+states both numbers and whether they balance:
+
+> **240 posts a day** at this schedule, against **186** arriving. Keeping up.
+> Roughly **$0.60** a day.
+
 A purely newest-first queue means anything that falls behind never catches up,
 so a quarter of every run goes to the oldest waiting posts. Posts older than the
 45-day novelty window are retired unjudged — they have no neighbours left to
 compare against, so a novelty score for them would be meaningless. `./run
-doctor` reports the depth; if it climbs run-to-run, raise `judge_limit` or
-schedule more often.
+doctor` reports the depth.
 
 ---
 

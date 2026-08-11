@@ -48,7 +48,7 @@ def load_env() -> None:
 
 def run(conn, skip: set[str] | None = None) -> int:
     from . import amplify, collect, curate, digest, extract, judge, links, notify
-    from . import novelty, replies, suggest, threads
+    from . import novelty, replies, schedule, suggest, threads
 
     load_env()
     skip = skip or set()
@@ -56,8 +56,16 @@ def run(conn, skip: set[str] | None = None) -> int:
     if not has_key:
         log("ANTHROPIC_API_KEY unset — judge and extract will be skipped")
 
+    # These two were settings in name only: the Schedule page saved them and
+    # nothing ever read them, so the one dial that matters — how much of the
+    # queue a run gets through — silently did nothing.
+    settings = schedule.load(conn)
+    judge_limit = int(settings.get("judge_limit", 60))
+    scrolls = int(settings.get("collect_scrolls", 5))
+    log(f"collect scrolls={scrolls}, judge limit={judge_limit}")
+
     stages: list[tuple[str, callable]] = [
-        ("collect",  lambda: collect.collect_all(conn, max_scrolls=5,
+        ("collect",  lambda: collect.collect_all(conn, max_scrolls=scrolls,
                                                  overlap_target=4, headless=True)),
         ("replies",  lambda: replies.mine(conn, limit=4, scrolls=3)),
         ("suggest",  lambda: suggest.harvest(conn, limit_seeds=2, scrolls=5)),
@@ -70,8 +78,10 @@ def run(conn, skip: set[str] | None = None) -> int:
         ("threads",  lambda: threads.apply(conn, dry_run=False)),
         ("dedup",    lambda: (novelty.embed_pending(conn),
                               novelty.scan(conn, apply=True))),
-        ("judge",    lambda: judge.run(conn, limit=60)),
-        ("extract",  lambda: extract.run(conn, limit=15)),
+        ("judge",    lambda: judge.run(conn, limit=judge_limit)),
+        # Extraction only runs on what cleared the bar, so it scales with the
+        # judging rate rather than being a fixed number.
+        ("extract",  lambda: extract.run(conn, limit=max(15, judge_limit // 4))),
         ("digest",   lambda: digest.build(conn)),
         # Last, so it announces only what the rest of the run actually produced.
         ("notify",   lambda: notify.deliver(conn)),

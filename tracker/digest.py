@@ -6,7 +6,7 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 
-from . import db, extract, paths, strictness
+from . import cluster, db, extract, paths, strictness
 
 ROOT = Path(__file__).resolve().parent.parent
 OUT_DIR = paths.data_dir() / "digests"
@@ -53,7 +53,17 @@ def gather(conn, since_hours: int, limit: int, min_value: int | None = None) -> 
         item = dict(row)
         item["extraction"] = extract.for_post(conn, item["id"])
         items.append(item)
-    return items
+
+    # One story per entry, same as the app and the notifier. This was the last
+    # output still listing six announcements of one release as six findings.
+    out = []
+    for group in cluster.group(items):
+        lead = dict(group["lead"])
+        lead["also"] = [
+            {"handle": m["author_handle"], "id": m["id"]} for m in group["members"][1:]
+        ]
+        out.append(lead)
+    return out
 
 
 def counts(conn, since_hours: int) -> dict:
@@ -105,7 +115,11 @@ def render(items: list[dict], stats: dict, title_date: str, relaxed: bool) -> st
             when = item["created_at"][:16].replace("T", " ")
             tag = " · reply" if item["capture_source"] == "reply" else ""
             if item.get("amplifiers"):
-                tag += f" · shared by {item['amplifiers']} tracked accounts"
+                n = item["amplifiers"]
+                tag += f" · shared by {n} tracked account{'s' if n != 1 else ''}"
+            also = item.get("also") or []
+            if also:
+                tag += f" · reported by {len(also) + 1} accounts"
             lines.append(
                 f"**[@{handle}](https://x.com/{handle})** · {when} · "
                 f"novelty {item['novelty']} · value {item['value']}{tag}"
@@ -145,6 +159,14 @@ def render(items: list[dict], stats: dict, title_date: str, relaxed: bool) -> st
                 lines.append("")
                 lines.append(f"*{item['rationale']}*")
             lines.append("")
+            if also:
+                # Independent reports, so each one is worth linking: the
+                # corroboration is the point, and one of them may say it better.
+                others = " · ".join(
+                    f"[@{a['handle']}](https://x.com/{a['handle']}/status/{a['id']})"
+                    for a in also[:6])
+                lines.append(f"Also reported by {others}")
+                lines.append("")
             lines.append(f"[open](https://x.com/{handle}/status/{item['id']})")
             lines.append("")
     return "\n".join(lines).rstrip() + "\n"

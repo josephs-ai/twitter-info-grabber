@@ -415,6 +415,59 @@ def test_read_state(tmp: Path) -> None:
     conn.close()
 
 
+def test_throughput(tmp: Path) -> None:
+    print("\nschedule throughput")
+    from tracker import db, schedule
+
+    conn = db.connect(tmp / "thr.db")
+    for i in range(70):
+        _seed_judged(conn, f"t{i}", 1, 0, 0)
+    conn.commit()
+
+    # 70 posts triaged over the 7-day window is 10 a day arriving; one run at 5.
+    slow = schedule._throughput(conn, {"times": ["07:00"], "judge_limit": 5,
+                                       "days": "everyday"})
+    check("a schedule below the arrival rate is flagged",
+          slow["keeping_up"] is False,
+          f"({slow['judged_per_day']}/day vs {slow['arriving_per_day']})")
+
+    fast = schedule._throughput(conn, {"times": ["07:00", "19:00"],
+                                       "judge_limit": 120, "days": "everyday"})
+    check("more runs and a bigger limit keep up", fast["keeping_up"] is True,
+          f"({fast['judged_per_day']}/day)")
+    check("cost tracks the judging rate",
+          fast["cost_per_day"] > slow["cost_per_day"])
+    check("weekdays-only counts as fewer runs",
+          schedule._throughput(conn, {"times": ["07:00"], "judge_limit": 100,
+                                      "days": "weekdays"})["judged_per_day"] < 100)
+    conn.close()
+
+
+def test_digest_clusters(tmp: Path) -> None:
+    print("\ndigest clustering")
+    from tracker import db, digest, strictness
+
+    conn = db.connect(tmp / "dig.db")
+    strictness.save(conn, "strict")
+    shared = "Acme released Muse 30B, an open-weight model under Apache 2.0"
+    _seed_judged(conn, "d1", 0, 4, 5, handle="vendor", text=shared)
+    _seed_judged(conn, "d2", 0, 4, 5, handle="runtime",
+                 text="Muse 30B is out from Acme, open weights, Apache 2.0 licensed")
+    _seed_judged(conn, "d3", 0, 4, 5, handle="other",
+                 text="Sparse attention degrades long-context recall, a study finds")
+    conn.execute("UPDATE judgements SET category='research'")
+    conn.commit()
+
+    items = digest.gather(conn, since_hours=48, limit=20)
+    check("the digest groups by story too", len(items) == 2, f"({len(items)})")
+    lead = next((i for i in items if i.get("also")), None)
+    check("the fold is recorded on the lead", lead is not None)
+    markdown = digest.render(items, digest.counts(conn, 48), "Today", False)
+    check("corroborating accounts are named", "Also reported by" in markdown)
+    check("and counted", "reported by 2 accounts" in markdown)
+    conn.close()
+
+
 def test_paths() -> None:
     print("\npaths")
     import os
@@ -480,6 +533,8 @@ def main() -> int:
         test_notify(tmp)
         test_search(tmp)
         test_read_state(tmp)
+        test_throughput(tmp)
+        test_digest_clusters(tmp)
         test_paths()
         test_onboarding(tmp)
 

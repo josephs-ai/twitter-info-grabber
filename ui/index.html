@@ -358,6 +358,7 @@ input[type=range].slider:focus-visible { outline: 2px solid var(--signal); outli
   padding: 11px 14px; margin-bottom: 22px; font-size: 13px; color: var(--muted);
 }
 .banner b { color: var(--paper); font-weight: 500; }
+.banner.warn { border-left-color: var(--rust); }
 .cmd {
   font: 11px/1.6 var(--mono); color: var(--faint); background: var(--panel);
   border: 1px solid var(--rule); padding: 9px 11px; word-break: break-all;
@@ -587,6 +588,25 @@ async function renderSchedule(wrap) {
     </div>
 
     <div class="field">
+      <label>How much it gets through</label>
+      <div class="hint">Judging is the metered stage. Set below what arrives and
+        the queue grows every day — which is invisible until it is months deep.</div>
+      <div class="banner ${st.throughput.keeping_up ? '' : 'warn'}">
+        <b>${num(st.throughput.judged_per_day)} posts a day</b> at this schedule,
+        against <b>${num(st.throughput.arriving_per_day)}</b> arriving.
+        ${st.throughput.keeping_up
+          ? 'Keeping up.'
+          : `Falling behind — ${num(st.throughput.waiting)} already waiting.`}
+        Roughly <b>$${st.throughput.cost_per_day.toFixed(2)}</b> a day.
+      </div>
+      <div class="times">
+        <span class="hint">posts judged per run</span>
+        <input type="number" min="10" max="500" step="10" value="${SCHED.judge_limit}"
+               onchange="setLimit(this.value)">
+      </div>
+    </div>
+
+    <div class="field">
       <label>Days</label>
       <div class="choices">
         <div class="choice" data-days="everyday" onclick="pickDays('everyday')">Every day</div>
@@ -697,6 +717,7 @@ function pickPreset(key) {
 }
 function pickDays(d) { SCHED.days = d; paintSchedule(); }
 function setTime(i, v) { if (v) SCHED.times[i] = v; }
+function setLimit(v) { SCHED.judge_limit = Math.max(10, parseInt(v) || 60); }
 function addTime() { SCHED.times.push('12:00'); paintSchedule(); }
 function delTime(i) {
   if (SCHED.times.length > 1) { SCHED.times.splice(i, 1); paintSchedule(); }

@@ -204,4 +204,33 @@ def status(conn) -> dict:
         "presets": PRESETS,
         "stage_info": [{"key": k, "label": l, "note": n} for k, l, n in STAGE_INFO],
         "last_run": dict(last) if last else None,
+        "throughput": _throughput(conn, settings),
+    }
+
+
+# Judging is metered per post, so the dial and its cost are the same decision
+# and belong on screen together.
+COST_PER_POST = 0.0025
+
+
+def _throughput(conn, settings: dict) -> dict:
+    """Whether this schedule keeps up with what collection brings in."""
+    from . import judge as judge_mod
+
+    runs = max(1, len(settings.get("times", []) or ["07:00"]))
+    if settings.get("days") == "weekdays":
+        runs = runs * 5 / 7
+    limit = int(settings.get("judge_limit", 60))
+    per_day = runs * limit
+
+    arriving = conn.execute(
+        "SELECT COUNT(*) n FROM triage WHERE stage='triaged' "
+        "AND updated_at > datetime('now', '-7 days')").fetchone()["n"] / 7.0
+    waiting = judge_mod.backlog(conn)["waiting"]
+    return {
+        "judged_per_day": round(per_day),
+        "arriving_per_day": round(arriving),
+        "keeping_up": per_day >= arriving,
+        "waiting": waiting,
+        "cost_per_day": round(per_day * COST_PER_POST, 2),
     }
