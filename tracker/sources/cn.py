@@ -165,12 +165,22 @@ def _harvest(urls, profile_dir, endpoints, walker, headless=True,
             viewport={"width": 1280, "height": 900})
         page = context.pages[0] if context.pages else context.new_page()
 
+        rejected = []
+
         def on_response(response):
-            if not any(e in response.url for e in endpoints):
-                return
             try:
                 payload = response.json()
             except Exception:
+                return
+            # Xiaohongshu answers every API call with success:false and
+            # "无登录信息" when there is no session — the endpoints fire, the
+            # JSON parses, and nothing comes back. Without this the run looks
+            # like a quiet day instead of a missing login.
+            if isinstance(payload, dict) and payload.get("success") is False:
+                message = str(payload.get("msg") or "")
+                if message and message not in rejected:
+                    rejected.append(message)
+            if not any(e in response.url for e in endpoints):
                 return
             for post in walker(payload):
                 seen.setdefault(post["id"], post)
@@ -186,6 +196,9 @@ def _harvest(urls, profile_dir, endpoints, walker, headless=True,
             except Exception as exc:  # noqa: BLE001 - one profile, not the run
                 log(f"  {url}: {str(exc).splitlines()[0][:70]}")
         context.close()
+    if rejected and not seen:
+        log(f"  the service rejected every request: {rejected[0]}")
+        log(f"  sign in first, into {profile_dir.name}")
     return list(seen.values())
 
 
