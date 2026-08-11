@@ -38,6 +38,10 @@ jobs:
           sudo apt-get install -y -qq python3-gi gir1.2-webkit2-4.1 libgirepository1.0-dev
 
       - name: Smoke tests
+        env:
+          # Belt and braces with the reconfigure in the suite itself: the
+          # runner's console is cp1252 and the tests print Chinese.
+          PYTHONIOENCODING: utf-8
         run: python tests/smoke.py
 
       - name: CLI responds

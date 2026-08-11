@@ -18,6 +18,17 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+# Windows consoles default to cp1252, so printing a test label containing
+# Chinese raised UnicodeEncodeError and failed the whole suite there — a
+# project that now reads Weibo and Xiaohongshu cannot describe its own subject
+# matter in ASCII. errors="replace" so a console that truly cannot render a
+# character degrades to "?" instead of taking the run down with it.
+for stream in (sys.stdout, sys.stderr):
+    try:
+        stream.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, ValueError):   # already wrapped, or not a tty
+        pass
+
 PASSED = 0
 FAILED: list[str] = []
 
