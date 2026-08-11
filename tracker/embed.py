@@ -26,6 +26,7 @@ neural backend.
 from __future__ import annotations
 
 import hashlib
+import os
 import re
 
 import numpy as np
@@ -50,6 +51,20 @@ def normalise(text: str) -> str:
 
 MIN_TOKENS = 3
 
+# Chinese, Japanese and Korean do not put spaces between words, so a
+# word-token count reads every CJK post as empty. This guard drops posts with
+# "no text", which meant a Weibo post of four dense sentences was binned as a
+# link-only retweet and never reached dedup or the judge at all. Counting han
+# characters individually is crude but right in the direction that matters:
+# each one carries roughly a morpheme.
+_CJK_RE = re.compile(
+    r"[぀-ヿ㐀-䶿一-鿿豈-﫿가-힯]")
+
+
+def token_count(text: str) -> int:
+    clean = normalise(text)
+    return len(_TOKEN_RE.findall(clean)) + len(_CJK_RE.findall(clean))
+
 
 def has_signal(text: str) -> bool:
     """Does this post contain enough words to compare meaningfully?
@@ -58,7 +73,7 @@ def has_signal(text: str) -> bool:
     string, and empty vectors match each OTHER at 1.000 — so without this guard
     every link-only retweet gets deduped against every other unrelated one.
     """
-    return len(_TOKEN_RE.findall(normalise(text))) >= MIN_TOKENS
+    return token_count(text) >= MIN_TOKENS
 
 
 def _hash(token: str) -> int:
@@ -92,6 +107,24 @@ class LexicalEmbedder:
         return np.vstack([self.encode(t) for t in texts])
 
 
+# The English model is blind to Chinese, and not in a way that fails safely.
+# Measured on potion-base-8M: two unrelated Chinese sentences scored 0.480 —
+# above the search threshold and near the clustering one — while a genuine
+# Chinese paraphrase pair scored exactly 0.000, both words being out of
+# vocabulary. Unrelated posts would merge and real duplicates would not.
+#
+# potion-multilingual-128M fixes it (unrelated 0.158, paraphrase 0.678) and
+# barely moves English (0.800 vs 0.839). It costs 1GB on disk against 59MB,
+# which is why it is a choice rather than the default: most users track English
+# sources only and should not pay for it.
+#
+#   AI_SIGNAL_EMBED=multilingual
+#
+# Switching re-embeds the corpus on the next dedup — local CPU work, no API
+# cost. Vectors are keyed by model name, so the two never mix.
+MULTILINGUAL = os.environ.get("AI_SIGNAL_EMBED", "").lower().startswith("multi")
+
+
 class SemanticEmbedder:
     """Distilled static embeddings (model2vec) — semantics without torch.
 
@@ -102,14 +135,16 @@ class SemanticEmbedder:
     paraphrase pair.
     """
 
-    name = "potion-base-8M"
+    repo = ("minishlab/potion-multilingual-128M" if MULTILINGUAL
+            else "minishlab/potion-base-8M")
+    name = repo.split("/")[-1]
     dim = 256
     _model = None
 
     def _load(self):
         if SemanticEmbedder._model is None:
             from model2vec import StaticModel
-            SemanticEmbedder._model = StaticModel.from_pretrained("minishlab/potion-base-8M")
+            SemanticEmbedder._model = StaticModel.from_pretrained(self.repo)
         return SemanticEmbedder._model
 
     def encode(self, text: str) -> np.ndarray:

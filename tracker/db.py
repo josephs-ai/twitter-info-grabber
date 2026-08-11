@@ -46,6 +46,8 @@ def migrate(conn: sqlite3.Connection) -> None:
             "amplifiers": "INTEGER NOT NULL DEFAULT 0",
             "thread_root_id": "TEXT",
             "thread_size": "INTEGER",
+            "platform": "TEXT NOT NULL DEFAULT 'x'",
+            "url": "TEXT",
         },
         "candidates": {
             "reply_count": "INTEGER NOT NULL DEFAULT 0",

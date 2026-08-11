@@ -24,7 +24,7 @@ from . import accounts as accounts_mod
 from . import extract as extract_mod
 from . import judge as judge_mod
 from . import notify as notify_mod
-from . import onboard, paths
+from . import onboard, paths, platforms
 from . import amplify, db, digest, feedback, health, novelty
 from . import cluster as cluster_mod
 from . import curate as curate_mod
@@ -96,7 +96,9 @@ class Api:
             item["rating"] = (conn.execute(
                 "SELECT rating FROM feedback WHERE post_id=?", (item["id"],)).fetchone()
                 or {"rating": None})["rating"]
-            item["url"] = f"https://x.com/{item['author_handle']}/status/{item['id']}"
+            item["url"] = platforms.post_url(item)
+            item["byline"] = platforms.byline(item)
+            item["platform_label"] = platforms.label(item.get("platform"))
             item["extraction"] = extract_mod.for_post(conn, item["id"])
             items.append(item)
         return items
@@ -135,7 +137,7 @@ class Api:
                      " AND p.id NOT IN (SELECT post_id FROM reads WHERE archived_at IS NOT NULL)")
             base = f"""
                 SELECT p.id, p.author_handle, p.text, p.created_at, p.amplifiers,
-                       p.capture_source, p.thread_size,
+                       p.capture_source, p.thread_size, p.platform, p.url,
                        j.verdict, j.novelty, j.value, j.category, j.rationale
                 FROM judgements j JOIN posts p ON p.id = j.post_id
                 WHERE 1=1 {window} {shelf}

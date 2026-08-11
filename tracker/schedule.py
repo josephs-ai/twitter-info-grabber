@@ -46,6 +46,7 @@ PRESETS = {
 # Stages the user can turn off, with why they might want to.
 STAGE_INFO = [
     ("collect",  "Fetch new posts", "The only stage that cannot be caught up later."),
+    ("sources",  "Read feeds and papers", "arXiv, Hacker News, lab blogs. No login needed."),
     ("replies",  "Mine conversations", "Finds people who reply under tracked posts."),
     ("suggest",  "Harvest follow graph", "Discovers accounts. Heaviest browsing."),
     ("links",    "Resolve links", "Fetches titles and abstracts behind URLs."),

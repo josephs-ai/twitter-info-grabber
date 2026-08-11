@@ -28,6 +28,12 @@ CREATE TABLE IF NOT EXISTS posts (
     thread_root_id  TEXT,
     thread_size     INTEGER,
 
+    -- Which service this came from, and its canonical address there. The URL
+    -- is stored rather than derived: every platform builds them differently,
+    -- and six places downstream had x.com hardcoded into an f-string.
+    platform        TEXT NOT NULL DEFAULT 'x',
+    url             TEXT,
+
     raw_json        TEXT,
     deleted_at      TEXT
 );

@@ -38,7 +38,7 @@ def test_imports() -> None:
                "embed", "novelty", "amplify", "links", "replies", "suggest",
                "judge", "extract", "digest", "feedback", "pipeline", "cli",
                "cluster", "health", "notify", "search", "strictness", "curate",
-               "paths", "onboard", "schedule", "app"]
+               "paths", "onboard", "schedule", "app", "platforms", "sources"]
     for name in modules:
         try:
             importlib.import_module(f"tracker.{name}")
@@ -105,6 +105,88 @@ def test_dedup() -> None:
     check("0.95 is a duplicate", novelty.classify(0.95) == "duplicate")
     check("0.75 is ambiguous", novelty.classify(0.75) == "ambiguous")
     check("0.30 is novel", novelty.classify(0.30) == "novel")
+
+
+def test_multilingual() -> None:
+    print("\nnon-latin text")
+    from tracker import embed
+
+    # The word-token guard read every CJK post as empty, so a dense Chinese
+    # post was binned as "link only" before it reached dedup or the judge.
+    check("Chinese text has signal",
+          embed.has_signal("英伟达发布了新的H200芯片，显存带宽提升了40%"))
+    check("Japanese text has signal", embed.has_signal("日本語のテキストもここにあります"))
+    check("Korean text has signal", embed.has_signal("한국어 텍스트도 포함됩니다"))
+    check("a single character still does not", not embed.has_signal("好"))
+    check("a bare link still does not", not embed.has_signal("RT @a: https://t.co/x"))
+    check("English is unaffected", embed.has_signal("Nvidia released the H200"))
+
+
+def test_platform_urls() -> None:
+    print("\nplatform addresses")
+    from tracker import platforms
+
+    x = {"platform": "x", "author_handle": "karpathy", "id": "123", "url": None}
+    check("X posts still build the old URL",
+          platforms.post_url(x) == "https://x.com/karpathy/status/123")
+    check("and keep the @", platforms.byline(x) == "@karpathy")
+
+    blog = {"platform": "rss", "author_handle": "OpenAI", "id": "rss:1",
+            "url": "https://openai.com/index/thing/"}
+    check("a stored URL wins", platforms.post_url(blog) == "https://openai.com/index/thing/")
+    check("a blog byline has no @", platforms.byline(blog) == "OpenAI")
+    check("the source is named", platforms.label("hn") == "Hacker News")
+
+    hn = {"platform": "hn", "author_handle": "pg", "id": "hn:1", "url": None}
+    check("a platform with no stored URL still derives one",
+          "news.ycombinator.com" in platforms.post_url(hn))
+
+
+def test_sources(tmp: Path) -> None:
+    print("\nsources")
+    from tracker import db
+    from tracker import sources
+    from tracker.sources import hackernews, rss
+
+    atom = """<?xml version="1.0"?>
+    <feed xmlns="http://www.w3.org/2005/Atom">
+      <title>Example Lab</title>
+      <entry>
+        <id>tag:example,2026:1</id>
+        <title>We trained a model</title>
+        <link rel="alternate" href="https://example.com/post"/>
+        <published>2026-08-01T10:00:00Z</published>
+        <summary>&lt;p&gt;It went &lt;b&gt;well&lt;/b&gt;.&lt;/p&gt;</summary>
+      </entry>
+    </feed>"""
+    posts = rss.parse(atom)
+    check("atom parses", len(posts) == 1, f"({len(posts)})")
+    check("markup is stripped", posts and "<b>" not in posts[0]["text"])
+    check("title leads the text", posts and posts[0]["text"].startswith("We trained a model"))
+    check("the link is kept", posts and posts[0]["url"] == "https://example.com/post")
+    check("dates normalise", posts and posts[0]["created_at"].startswith("2026-08-01"))
+
+    rss2 = """<?xml version="1.0"?><rss><channel><title>Blog</title>
+      <item><title>A post</title><link>https://b.example/1</link>
+      <guid>https://b.example/1</guid><description>Body text</description>
+      <pubDate>Fri, 01 Aug 2026 10:00:00 GMT</pubDate></item></channel></rss>"""
+    check("rss 2.0 parses too", len(rss.parse(rss2)) == 1)
+
+    check("an off-topic HN title is filtered", not hackernews.relevant("Best sourdough recipe"))
+    check("an AI title is kept", hackernews.relevant("Show HN: a faster LLM inference engine"))
+
+    conn = db.connect(tmp / "src.db")
+    seen, added = sources.store(conn, posts)
+    check("a source post is stored", added == 1, f"({added})")
+    again = sources.store(conn, posts)[1]
+    check("and storing twice adds nothing", again == 0, f"({again})")
+    row = conn.execute("SELECT platform, url FROM posts WHERE id=?",
+                       (posts[0]["id"],)).fetchone()
+    check("with its platform recorded", row["platform"] == "rss")
+    queued = conn.execute("SELECT stage FROM triage WHERE post_id=?",
+                          (posts[0]["id"],)).fetchone()
+    check("and queued for triage like anything else", queued["stage"] == "collected")
+    conn.close()
 
 
 def test_threads(tmp: Path) -> None:
@@ -588,6 +670,9 @@ def main() -> int:
         test_schema(tmp)
         test_parser()
         test_dedup()
+        test_multilingual()
+        test_platform_urls()
+        test_sources(tmp)
         test_threads(tmp)
         test_context(tmp)
         test_curation(tmp)

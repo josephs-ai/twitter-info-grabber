@@ -19,6 +19,7 @@ from . import links as links_mod
 from . import notify as notify_mod
 from . import novelty as novelty_mod
 from . import pipeline as pipeline_mod
+from . import platforms as platforms_mod
 from . import replies as replies_mod
 from . import schedule as schedule_mod
 from . import search as search_mod
@@ -356,9 +357,9 @@ def cmd_search(args) -> int:
         for row in rows:
             scored = (f"  [n{row['novelty']} v{row['value']}]"
                       if row["novelty"] is not None else "  [unjudged]")
-            print(f"\n@{row['author_handle']}  {row['created_at'][:10]}{scored}")
+            print(f"\n{platforms_mod.byline(row)}  {row['created_at'][:10]}{scored}")
             print("  " + " ".join((row["text"] or "").split())[:220])
-            print(f"  https://x.com/{row['author_handle']}/status/{row['id']}")
+            print(f"  {platforms_mod.post_url(row)}")
         print(f"\n{len(rows)} results")
         return 0
     finally:
@@ -390,6 +391,34 @@ def cmd_notify(args) -> int:
             print(f"\nsent via {', '.join(result['sent'])}")
         elif result["found"]:
             print("\nno channel delivered — is a notification daemon running?")
+        return 0
+    finally:
+        conn.close()
+
+
+def cmd_sources(args) -> int:
+    """Feeds, papers and forums — everything that does not need a browser."""
+    from . import sources as sources_mod
+    from .sources import rss as rss_mod
+
+    conn = db.connect(args.db)
+    try:
+        if args.add:
+            rss_mod.add(conn, args.add, args.title)
+            print(f"added {args.add}")
+        if args.list:
+            for f in rss_mod.listing(conn):
+                mark = "  " if f["active"] else "off"
+                note = f"  ERROR: {f['last_error'][:60]}" if f["last_error"] else ""
+                print(f" {mark} {(f['title'] or '')[:28]:<28} {f['url']}{note}")
+            return 0
+
+        results = sources_mod.fetch(conn, args.only, limit=args.limit)
+        for name, r in results.items():
+            if "error" in r:
+                print(f"  {name:<8} FAILED  {r['error']}")
+            else:
+                print(f"  {name:<8} {r['seen']:4d} seen, {r['new']:4d} new")
         return 0
     finally:
         conn.close()
@@ -604,6 +633,14 @@ def main(argv=None) -> int:
     p.add_argument("--by-replies", action="store_true",
                    help="rank by reply presence instead of follow graph")
     p.set_defaults(func=cmd_candidates)
+
+    p = sub.add_parser("sources", help="feeds, papers and forums — no browser needed")
+    p.add_argument("--only", nargs="+", metavar="NAME", help="rss, hn, arxiv")
+    p.add_argument("--limit", type=int, default=40, help="items per source")
+    p.add_argument("--add", metavar="URL", help="add an RSS/Atom feed")
+    p.add_argument("--title", help="name for the feed being added")
+    p.add_argument("--list", action="store_true", help="show configured feeds")
+    p.set_defaults(func=cmd_sources)
 
     p = sub.add_parser("search", help="search everything collected, judged or not")
     p.add_argument("query", nargs="+")

@@ -29,7 +29,7 @@ import subprocess
 import urllib.error
 import urllib.request
 
-from . import cluster, db, strictness
+from . import cluster, db, platforms, strictness
 
 DEFAULTS = {
     "desktop": True,
@@ -95,7 +95,7 @@ def undelivered(conn, limit: int = 20) -> list[dict]:
     where, bar = strictness.clause(strictness.load(conn))
     rows = conn.execute(
         f"""
-        SELECT j.id jid, p.id, p.author_handle, p.text, p.created_at,
+        SELECT j.id jid, p.id, p.author_handle, p.text, p.created_at, p.platform, p.url,
                j.value, j.novelty, e.headline, e.so_what
         FROM judgements j
         JOIN posts p ON p.id = j.post_id
@@ -128,8 +128,8 @@ def compose(items: list[dict], max_items: int) -> tuple[str, str]:
     lines = []
     for group in groups[:max_items]:
         lead = group["lead"]
-        line = (f"• {_headline(lead)}\n  @{lead['author_handle']} "
-                f"· x.com/{lead['author_handle']}/status/{lead['id']}")
+        line = (f"• {_headline(lead)}\n  {platforms.byline(lead)} "
+                f"· {platforms.post_url(lead)}")
         if group["size"] > 1:
             others = ", ".join("@" + s for s in group["sources"][1:4])
             more = group["size"] - 1

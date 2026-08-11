@@ -6,7 +6,7 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 
-from . import cluster, db, extract, paths, strictness
+from . import cluster, db, extract, paths, platforms, strictness
 
 ROOT = Path(__file__).resolve().parent.parent
 OUT_DIR = paths.data_dir() / "digests"
@@ -37,7 +37,7 @@ def gather(conn, since_hours: int, limit: int, min_value: int | None = None) -> 
     rows = conn.execute(
         f"""
         SELECT p.id, p.author_handle, p.author_name, p.text, p.created_at,
-               p.capture_source, p.amplifiers,
+               p.capture_source, p.amplifiers, p.platform, p.url,
                j.novelty, j.value, j.category, j.rationale
         FROM judgements j
         JOIN posts p ON p.id = j.post_id
@@ -60,7 +60,9 @@ def gather(conn, since_hours: int, limit: int, min_value: int | None = None) -> 
     for group in cluster.group(items):
         lead = dict(group["lead"])
         lead["also"] = [
-            {"handle": m["author_handle"], "id": m["id"]} for m in group["members"][1:]
+            {"handle": m["author_handle"], "id": m["id"],
+             "byline": platforms.byline(m), "url": platforms.post_url(m)}
+            for m in group["members"][1:]
         ]
         out.append(lead)
     return out
@@ -120,8 +122,11 @@ def render(items: list[dict], stats: dict, title_date: str, relaxed: bool) -> st
             also = item.get("also") or []
             if also:
                 tag += f" · reported by {len(also) + 1} accounts"
+            source = platforms.label(item.get("platform"))
+            who = platforms.byline(item)
+            author_link = platforms.author_url(item)
             lines.append(
-                f"**[@{handle}](https://x.com/{handle})** · {when} · "
+                f"**[{who}]({author_link})** · {source} · {when} · "
                 f"novelty {item['novelty']} · value {item['value']}{tag}"
             )
             lines.append("")
@@ -163,11 +168,11 @@ def render(items: list[dict], stats: dict, title_date: str, relaxed: bool) -> st
                 # Independent reports, so each one is worth linking: the
                 # corroboration is the point, and one of them may say it better.
                 others = " · ".join(
-                    f"[@{a['handle']}](https://x.com/{a['handle']}/status/{a['id']})"
+                    f"[{a.get('byline') or '@' + a['handle']}]({a['url']})"
                     for a in also[:6])
                 lines.append(f"Also reported by {others}")
                 lines.append("")
-            lines.append(f"[open](https://x.com/{handle}/status/{item['id']})")
+            lines.append(f"[open]({platforms.post_url(item)})")
             lines.append("")
     return "\n".join(lines).rstrip() + "\n"
 

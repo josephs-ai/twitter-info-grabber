@@ -48,7 +48,7 @@ def load_env() -> None:
 
 def run(conn, skip: set[str] | None = None) -> int:
     from . import amplify, collect, curate, digest, extract, judge, links, notify
-    from . import novelty, replies, schedule, suggest, threads
+    from . import novelty, replies, schedule, sources, suggest, threads
 
     load_env()
     skip = skip or set()
@@ -67,6 +67,9 @@ def run(conn, skip: set[str] | None = None) -> int:
     stages: list[tuple[str, callable]] = [
         ("collect",  lambda: collect.collect_all(conn, max_scrolls=scrolls,
                                                  overlap_target=4, headless=True)),
+        # Feeds, papers and forums: no browser, no login, nothing to violate.
+        # Runs after X so a slow browser sweep never delays the cheap sources.
+        ("sources",  lambda: log(str(sources.fetch(conn, limit=40)))),
         ("replies",  lambda: replies.mine(conn, limit=4, scrolls=3)),
         ("suggest",  lambda: suggest.harvest(conn, limit_seeds=2, scrolls=5)),
         ("links",    lambda: links.resolve(conn, limit=40)),
