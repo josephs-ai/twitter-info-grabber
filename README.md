@@ -3,12 +3,13 @@
 [![CI](https://github.com/josephs-ai/twitter-info-grabber/workflows/CI/badge.svg)](https://github.com/josephs-ai/twitter-info-grabber/actions)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 
-Follows a curated set of AI researchers on X and surfaces only the posts that
-are both **new** and **worth reading** — then extracts the actual findings, so
-you get the information rather than a reading list.
+Follows AI researchers across X, Weibo, Xiaohongshu, arXiv, Hacker News and
+any RSS feed, and surfaces only what is both **new** and **worth reading** —
+then extracts the actual findings, so you get the information rather than a
+reading list.
 
-A recent week: 3,411 posts collected, 313 reached the judge, 8 cleared the bar.
-One of them:
+A recent week: 4,538 posts collected across six sources, 526 reached the judge,
+20 cleared the bar. One of them:
 
 > **Training a single Transformer layer during RL post-training recovers most of
 > the gains from full-parameter RL, with high-contribution layers concentrated in
@@ -338,6 +339,79 @@ doctor` reports the depth.
 
 ---
 
+## Sources other than X
+
+X needed a browser, an interception layer and a burner account. Most of what is
+worth reading needs none of that:
+
+| Source | Needs | Notes |
+|---|---|---|
+| `rss` | nothing | 13 lab and researcher feeds, checked live. Anthropic publishes none, which is why the lab you would expect is missing. |
+| `arxiv` | nothing | The Atom API. Everything else here is people reacting to papers; this is the paper, including the ones nobody amplified. |
+| `hn` | nothing | The Firebase API. Where a release gets argued with — the person explaining why the benchmark is misleading is in those comments. |
+| `weibo` | nothing | The mobile site returns search results logged out. Closest in shape to X and the better of the two Chinese sources. |
+| `xhs` | a login | Xiaohongshu. Its API answers nothing without a session. |
+
+```bash
+./run sources                 # rss, arxiv and hn — the default sweep
+./run sources --only cn       # Weibo and Xiaohongshu, never automatic
+./run login --service xhs     # separate browser profile per service
+```
+
+**Yield is worth watching, because a source that collects a lot and surfaces
+nothing is not free** — every post it adds is money at the judge. `./run stats`
+reports it:
+
+```
+  source    collected  judged  surfaced   mean
+  x              3876     334         8   1.40
+  arxiv            80      40         9   2.65
+  hn               51      20         3   2.35
+  rss             375       7         0   1.86
+  weibo            60      31         0   1.39
+  xhs              96      94         0   1.06
+```
+
+Read that column of means before deciding what to track. **arXiv surfaces 23%
+of what it submits to the judge; X surfaces 2.4%** — a paper is ten times more
+likely to be worth your attention than a post about a paper, which is roughly
+what you would expect and not at all how this project started. Hacker News is
+second. The tool began as a way to follow people on X and its own numbers now
+argue for papers and forums first.
+
+That table is also why **Xiaohongshu's keyword search is off by default**. It does
+return AI content, and the judge then scored 90 notes at a mean value of 1.07
+out of 5 with none clearing the bar: searching a mass-market platform finds
+mass-market writing — "deploy a model on your PC from zero", "7 AI concepts in
+one diagram", interview-prep guides. Pass keywords explicitly to turn it back
+on. Tracking specific Xiaohongshu profiles still works and is a different
+proposition.
+
+### Reading Chinese
+
+Set this before collecting anything non-English:
+
+```bash
+echo "AI_SIGNAL_EMBED=multilingual" >> .env
+./run dedup --apply          # re-embeds locally, no API cost
+```
+
+The default embedder is English-only, and it does not fail safely on Chinese —
+it fails *confidently*. Measured on real posts, it scored these pairs as
+duplicates of each other:
+
+| | |
+|---|---|
+| 0.942 | a closed-door private equity meeting **vs** an essay on what "AI flavour" in writing is |
+| 0.957 | a conference countdown quoting Borges **vs** how a company lost a fortune reselling Office |
+
+Both are past the 0.92 duplicate threshold, so unrelated posts were silently
+dropped as repeats. The multilingual model scores the same pairs at 0.044 and
+0.126, and barely moves English (0.800 against 0.839). It costs 1GB against
+59MB, which is the only reason it is not the default.
+
+---
+
 ## Being told
 
 A filter that runs on a schedule is only worth having if it can reach you.
@@ -361,8 +435,8 @@ fire three hundred notifications for posts it newly admits.
 ## Commands
 
 ```
-collect   replies   suggest   links   curate   amplify   threads
-dedup     judge     extract   digest   notify      the pipeline, in order
+collect   sources   replies   suggest   links   curate   amplify
+threads   dedup     judge     extract  digest  notify   the pipeline, in order
 
 daily     run every stage once      app       open the desktop app
 search    query everything collected, judged or not
@@ -371,7 +445,16 @@ notify    announce findings; set desktop and webhook
 review    read past judgements      rate      record what you thought
 replay    re-judge under a new prompt         stats     what is in the database
 accounts  who is tracked            candidates  who was discovered
-login     sign in to X
+sources   read feeds, papers and forums without a browser
+login     sign in — `--service x|weibo|xhs`, each with its own profile
+```
+
+```bash
+./run accounts --add weibo:1402400261     # track a Weibo user by uid
+./run accounts --add xhs:5f8a1b2c3d4e     # or a Xiaohongshu profile
+./run sources --add https://example.com/feed.xml --title "A blog"
+./run sources --only cn                   # Weibo and Xiaohongshu, deliberately
+./run stats                               # yield per source — see below
 ```
 
 `./run doctor` when something seems wrong. `./run <cmd> --help` for options.
