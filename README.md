@@ -198,6 +198,13 @@ good?" stays a query rather than a guess.
 `./run app` opens a real desktop window — the same Python the CLI uses, so
 there is one implementation of every rule.
 
+**Today** reads the same run three ways: *assay* is the funnel, *ledger* is
+every number the run produced with nothing drawn that a figure would say
+better, and *poster* is the single figure that matters with its context. They
+share one query, so they cannot disagree by one.
+
+![Today](ui/assets/screenshot-today.png)
+
 ![Surfaced](ui/assets/screenshot-surfaced.png)
 
 *What cleared the bar, with the findings extracted: headline, claims, figures
@@ -485,6 +492,8 @@ a network change and aborts in-flight requests.
 ```
 tracker/     the pipeline, one module per stage
 ui/          desktop app front end (plain HTML, no build step)
+ui/assets/fonts/  Archivo, extracted from the design so the app works offline
+AI Signal (standalone).html   the Claude Design source the UI was built from
 packaging/   PyInstaller spec and the frozen entry point
 spike/       the throwaway proof that GraphQL interception works
 schema.sql   the database, heavily commented

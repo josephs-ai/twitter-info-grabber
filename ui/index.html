@@ -19,81 +19,228 @@
    Warm graphite rather than the usual blue-black, and one amber signal colour
    used only where something survived the filter.
 --------------------------------------------------------------------------- */
+/* Type from the design: Archivo, extracted out of the bundle and served from
+   ui/assets/fonts so the app stays self-contained and offline. */
+@font-face {
+  font-family: 'Archivo'; font-style: normal; font-weight: 100 900;
+  font-stretch: 100%; font-display: swap;
+  src: url('assets/fonts/73014638.woff2') format('woff2');
+}
+
 :root {
-  --ink:    #131110;
-  --panel:  #1a1816;
-  --raise:  #23201d;
-  --rule:   #2c2825;
-  --paper:  #e9e4da;
-  --muted:  #8b8478;
-  --faint:  #5d574e;
-  --signal: #e0a63c;
-  --moss:   #8aa46b;
-  --rust:   #cd6f55;
+  --ink:    #201e1d;   /* rail, hero bands, body text on light */
+  --paper:  #f3f2f2;   /* the canvas */
+  --card:   #ffffff;
+  --signal: #ec3013;   /* one red, used only where something survived */
+  --muted:  #605d5d;
+  --faint:  #9b9797;
+  --rule:   #d7d3d3;
+  --rule-soft: #eae7e7;
+  --on-dark:      #f3f2f2;
+  --on-dark-mute: #9b9797;
+  --on-dark-rule: rgba(243, 242, 242, .18);
+  --moss:   #4d6b34;
+  --rust:   #a8452c;
   --mono: ui-monospace, "Ubuntu Mono", "DejaVu Sans Mono", monospace;
-  --sans: system-ui, "Ubuntu", "Cantarell", sans-serif;
+  --sans: 'Archivo', system-ui, "Ubuntu", "Cantarell", sans-serif;
 }
-@media (prefers-color-scheme: light) {
-  :root {
-    --ink: #f4f1eb; --panel: #fffefb; --raise: #eae5db; --rule: #ded7c9;
-    --paper: #1c1a17; --muted: #6d6559; --faint: #9a9284;
-    --signal: #9a6a10; --moss: #4d6b34; --rust: #a8452c;
-  }
-}
+
 * { box-sizing: border-box; }
 html, body { height: 100%; }
 body {
-  margin: 0; background: var(--ink); color: var(--paper);
-  font: 14.5px/1.6 var(--sans);
-  display: grid; grid-template-columns: 186px minmax(0, 1fr);
+  margin: 0; background: var(--paper); color: var(--ink);
+  font: 15px/1.55 var(--sans);
+  display: grid; grid-template-columns: 224px minmax(0, 1fr);
   overflow: hidden;
 }
-::selection { background: var(--signal); color: var(--ink); }
+::selection { background: var(--signal); color: #fff; }
 
 /* --- left rail ----------------------------------------------------------- */
 nav {
-  background: var(--panel); border-right: 1px solid var(--rule);
+  background: var(--ink); color: var(--on-dark);
   display: flex; flex-direction: column; overflow: hidden;
 }
 .mark {
-  font: 600 11px/1 var(--mono); letter-spacing: .18em; text-transform: uppercase;
-  padding: 20px 16px 6px; color: var(--paper);
+  font: 800 21px/1 var(--sans); letter-spacing: -.02em;
+  padding: 22px 20px 5px; color: var(--on-dark);
 }
 .mark i { color: var(--signal); font-style: normal; }
 .tagline {
-  font: 10px/1.55 var(--mono); color: var(--faint); padding: 0 14px 20px;
-  letter-spacing: .02em;
+  font: 600 10px/1.6 var(--sans); color: var(--on-dark-mute);
+  padding: 0 20px 18px; letter-spacing: .13em; text-transform: uppercase;
+  border-bottom: 2px solid var(--signal);
 }
-.navlist { flex: 1; overflow-y: auto; padding: 0 8px; }
+.navlist { flex: 1; overflow-y: auto; padding: 6px 0 0; }
 nav button {
   display: block; width: 100%; background: none; border: 0; cursor: pointer;
-  color: var(--muted); text-align: left; padding: 6px 8px; border-radius: 4px;
-  font: 12.5px/1.5 var(--sans);
+  color: var(--on-dark-mute); text-align: left; padding: 8px 20px;
+  font: 15px/1.5 var(--sans);
 }
 nav button[hidden] { display: none; }   /* display:block above outranks [hidden] */
-nav button:hover { color: var(--paper); background: var(--raise); }
-nav button.on { color: var(--ink); background: var(--signal); font-weight: 600; }
-nav button:focus-visible { outline: 2px solid var(--signal); outline-offset: 1px; }
+nav button:hover { color: var(--on-dark); }
+nav button.on {
+  color: #fff; background: var(--signal); font-weight: 600;
+}
+nav button:focus-visible { outline: 2px solid var(--signal); outline-offset: -2px; }
 .group {
-  font: 10px/1 var(--mono); letter-spacing: .16em; text-transform: uppercase;
-  color: var(--faint); padding: 18px 8px 7px;
+  font: 600 10px/1 var(--sans); letter-spacing: .15em; text-transform: uppercase;
+  color: var(--on-dark-mute); padding: 20px 20px 8px; opacity: .8;
 }
 nav button b {
-  float: right; font: 10px/1.6 var(--mono); color: var(--signal); font-weight: 600;
+  float: right; font: 600 12px/1.5 var(--sans); color: var(--signal);
 }
-nav button.on b { color: var(--ink); }
+nav button.on b { color: #fff; }
+
+/* --- content ------------------------------------------------------------- */
+main { overflow-y: auto; }
+.pagehead {
+  display: flex; align-items: flex-end; justify-content: space-between;
+  gap: 20px; padding: 22px 34px 20px; border-bottom: 1px solid var(--rule);
+  background: var(--paper); position: sticky; top: 0; z-index: 5;
+}
+.pagehead .when {
+  font: 600 10.5px/1 var(--sans); letter-spacing: .15em; text-transform: uppercase;
+  color: var(--muted); margin-bottom: 8px;
+}
+.pagehead h1 { font: 800 30px/1 var(--sans); letter-spacing: -.025em; margin: 0; }
+.modes { display: flex; gap: 8px; align-items: center; }
+.modes button {
+  background: none; border: 1px solid var(--ink); color: var(--ink);
+  font: 700 11px/1 var(--sans); letter-spacing: .12em; text-transform: uppercase;
+  padding: 9px 14px; cursor: pointer;
+}
+.modes button.on { background: var(--signal); border-color: var(--signal); color: #fff; }
+.modes button.go {
+  background: var(--signal); border-color: var(--signal); color: #fff;
+  text-transform: none; letter-spacing: 0; font-size: 14px; font-weight: 600;
+  padding: 9px 16px;
+}
+.modes button:hover { opacity: .88; }
+
+.pad { padding: 26px 34px 70px; }
+.wrap, .wide, .wide-data { margin: 0 auto; padding: 28px 34px 80px; }
+.wrap { max-width: 70ch; }
+/* Controls are laid out on the content column but must never wrap onto a
+   second line — that was the shape the old three-row stack took. */
+.toolbar { flex-wrap: nowrap; }
+.toolbar .ctl > span { flex: 0 0 auto; }
+.ctl select { max-width: 15ch; text-overflow: ellipsis; }
+.wide-data { max-width: 1080px; }
+.wide { max-width: 940px; }
+h1 { font: 800 26px/1.15 var(--sans); margin: 0 0 6px; letter-spacing: -.02em; }
+.lede { color: var(--muted); font-size: 14px; margin-bottom: 24px; }
+
+/* --- today: three readings of one run ------------------------------------ */
+/* Alternating bands rather than cards: the run is one story told at three
+   depths, and a band change says "same subject, different depth" more
+   cleanly than a box does. */
+.band { padding: 34px; }
+.band.dark { background: var(--ink); color: var(--on-dark); }
+.band.red { background: var(--signal); color: #fff; }
+.hero { display: flex; align-items: baseline; gap: 28px; flex-wrap: wrap; }
+.hero .n {
+  font: 800 96px/.85 var(--sans); letter-spacing: -.045em; color: var(--signal);
+}
+.band.red .hero .n { color: #fff; font-size: 104px; }
+.hero .t { max-width: 42ch; }
+.hero .t b { display: block; font: 700 24px/1.2 var(--sans); letter-spacing: -.02em; }
+.hero .t span { color: var(--on-dark-mute); font-size: 15px; }
+.band.red .hero .t b { font-size: 21px; }
+.band.red .hero .t span, .band.red .kicker { color: rgba(255,255,255,.82); }
+.kicker {
+  font: 600 10.5px/1 var(--sans); letter-spacing: .15em; text-transform: uppercase;
+  color: var(--on-dark-mute); margin-bottom: 14px;
+}
+
+.figrow {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  border-top: 1px solid var(--on-dark-rule); margin-top: 30px;
+}
+.figrow > div { padding: 20px 22px 4px; border-left: 1px solid var(--on-dark-rule); }
+.figrow > div:first-child { border-left: 0; padding-left: 0; }
+.figrow b { display: block; font: 800 30px/1 var(--sans); letter-spacing: -.03em; }
+.figrow span {
+  display: block; margin-top: 8px;
+  font: 600 10px/1 var(--sans); letter-spacing: .14em; text-transform: uppercase;
+  color: var(--on-dark-mute);
+}
+
+/* the funnel, as bars that carry their own annotation */
+.funnel h2 { font: 800 27px/1.15 var(--sans); letter-spacing: -.025em; margin: 0; }
+.funnel .head { display: flex; justify-content: space-between; align-items: baseline;
+                margin-bottom: 26px; gap: 20px; }
+.frow { margin-bottom: 20px; }
+.frow .lab {
+  display: flex; justify-content: space-between; align-items: baseline; gap: 16px;
+  font: 600 10.5px/1 var(--sans); letter-spacing: .14em; text-transform: uppercase;
+  color: var(--muted); margin-bottom: 7px;
+}
+.frow .lab i { font-style: normal; text-transform: none; letter-spacing: 0;
+               font-weight: 400; font-size: 13px; color: var(--faint); }
+.frow .bar { display: flex; align-items: center; gap: 14px; }
+.frow .bar i { display: block; height: 30px; background: #444141; }
+.frow .bar b { font: 800 21px/1 var(--sans); letter-spacing: -.02em; }
+.frow.first .bar i { background: var(--ink); }
+.frow.out .lab { color: var(--signal); }
+.frow.out .bar i { background: var(--signal); }
+.frow.out .bar b { color: var(--signal); }
+
+/* ledger */
+.sheet { width: 100%; border-collapse: collapse; font-size: 14px; }
+.sheet th {
+  text-align: right; padding: 0 0 10px; border-bottom: 2px solid var(--ink);
+  font: 600 10px/1 var(--sans); letter-spacing: .14em; text-transform: uppercase;
+  color: var(--muted);
+}
+.sheet th:first-child, .sheet td:first-child { text-align: left; }
+.sheet th:last-child, .sheet td:last-child { text-align: left; padding-left: 22px; }
+.sheet td {
+  text-align: right; padding: 12px 0; border-bottom: 1px solid var(--rule-soft);
+}
+.sheet td:first-child {
+  font: 700 11px/1 var(--sans); letter-spacing: .12em; text-transform: uppercase;
+}
+.sheet td b { font-weight: 700; }
+.sheet tr.out td:first-child, .sheet tr.out td b { color: var(--signal); }
+.sheet td.why { color: var(--muted); font-size: 13px; }
+.sheet td.dim { color: var(--faint); }
+
+.cards {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(255px, 1fr));
+  border-top: 1px solid var(--rule); border-left: 1px solid var(--rule);
+}
+.cards > div {
+  padding: 20px 22px; border-right: 1px solid var(--rule);
+  border-bottom: 1px solid var(--rule); background: var(--card);
+}
+.cards .k {
+  font: 600 10px/1 var(--sans); letter-spacing: .14em; text-transform: uppercase;
+  color: var(--signal); margin-bottom: 12px;
+}
+.cards b { display: block; font: 800 30px/1 var(--sans); letter-spacing: -.03em; }
+.cards p { margin: 10px 0 0; color: var(--muted); font-size: 13px; line-height: 1.45; }
+
+/* thirty days of surfacing, so a quiet week is visible as one */
+.spark { display: flex; align-items: flex-end; gap: 4px; height: 130px; margin-top: 8px; }
+.spark i { flex: 1; background: #444141; min-height: 2px; }
+.spark i.today { background: var(--signal); }
+.sparkfoot {
+  display: flex; justify-content: space-between; margin-top: 10px;
+  font: 600 10px/1 var(--sans); letter-spacing: .14em; text-transform: uppercase;
+  color: var(--muted);
+}
 
 /* --- rail footer: the funnel and the machinery, folded ------------------- */
-.foot { border-top: 1px solid var(--rule); }
+.foot { border-top: 1px solid var(--on-dark-rule); }
 .foot > summary {
   display: flex; align-items: center; gap: 8px; cursor: pointer;
   padding: 12px 16px; list-style: none;
-  font: 11px/1.4 var(--mono); color: var(--muted); letter-spacing: .04em;
+  font: 11px/1.4 var(--mono); color: var(--on-dark-mute); letter-spacing: .04em;
 }
 .foot > summary::-webkit-details-marker { display: none; }
-.foot > summary:hover { background: var(--raise); }
+.foot > summary:hover { background: rgba(243,242,242,.07); }
 .ratio { flex: 1; }
-.ratio b { color: var(--paper); font-weight: 500; }
+.ratio b { color: var(--on-dark); font-weight: 500; }
 .ratio b.out { color: var(--signal); }
 .ratio i { color: var(--faint); font-style: normal; margin: 0 2px; }
 .dot {
@@ -107,18 +254,18 @@ nav button.on b { color: var(--ink); }
 .stage { margin-bottom: 9px; }
 .stage .lab {
   display: flex; justify-content: space-between; align-items: baseline;
-  font: 10.5px/1.4 var(--mono); color: var(--muted); letter-spacing: .04em;
+  font: 10.5px/1.4 var(--mono); color: var(--on-dark-mute); letter-spacing: .04em;
 }
-.stage .lab b { color: var(--paper); font-weight: 500; }
-.track { height: 3px; background: var(--raise); margin-top: 3px; border-radius: 2px; }
+.stage .lab b { color: var(--on-dark); font-weight: 500; }
+.track { height: 3px; background: var(--on-dark-rule); margin-top: 3px; border-radius: 2px; }
 .track i { display: block; height: 100%; background: var(--muted); border-radius: 2px; }
 .stage.out .track i { background: var(--signal); }
 .stage.out .lab b { color: var(--signal); }
 
-.checks { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--rule); }
+.checks { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--on-dark-rule); }
 .chk {
   display: grid; grid-template-columns: 7px 1fr; gap: 7px; align-items: baseline;
-  font: 10.5px/1.5 var(--mono); color: var(--muted); margin-bottom: 6px;
+  font: 10.5px/1.5 var(--mono); color: var(--on-dark-mute); margin-bottom: 6px;
 }
 .chk i {
   width: 5px; height: 5px; border-radius: 50%; background: var(--moss);
@@ -127,26 +274,10 @@ nav button.on b { color: var(--ink); }
 .chk.warn i { background: var(--signal); }
 .chk.fail i { background: var(--rust); }
 .chk b {
-  grid-column: 2; display: block; font-weight: 400; color: var(--faint);
+  grid-column: 2; display: block; font-weight: 400; color: var(--on-dark-mute);
   font-size: 10px;
 }
 .chk.fail b { color: var(--rust); }
-
-/* --- content ------------------------------------------------------------- */
-main { overflow-y: auto; padding: 30px 40px 80px; }
-.wrap, .wide { margin: 0 auto; }
-.wrap { max-width: 70ch; }
-/* Controls are laid out on the content column but must never wrap onto a
-   second line — that was the shape the old three-row stack took. */
-.toolbar { flex-wrap: nowrap; }
-.toolbar .ctl > span { flex: 0 0 auto; }
-.ctl select { max-width: 15ch; text-overflow: ellipsis; }
-.wide-data { max-width: 940px; }          /* prose beyond this is unreadable */
-.wide { max-width: 900px; }
-h1 {
-  font: 600 20px/1.25 var(--sans); margin: 0 0 5px; letter-spacing: -.01em;
-}
-.lede { color: var(--muted); font-size: 13.5px; margin-bottom: 26px; }
 
 /* entries: hairline-separated, not boxed. a signal rule marks what survived. */
 .entry { border-top: 1px solid var(--rule); padding: 22px 0 24px; }
@@ -164,7 +295,7 @@ h1 {
 
 .headline { font: 600 17px/1.4 var(--sans); margin-bottom: 12px; letter-spacing: -.005em; }
 .claims { margin: 0 0 15px; padding: 0; list-style: none; }
-.claims li { position: relative; padding-left: 15px; margin-bottom: 6px; color: var(--paper); }
+.claims li { position: relative; padding-left: 15px; margin-bottom: 6px; color: var(--ink); }
 .claims li::before {
   content: ""; position: absolute; left: 0; top: .72em;
   width: 5px; height: 1px; background: var(--faint);
@@ -240,7 +371,7 @@ h1 {
 .day > summary::-webkit-details-marker { display: none; }
 .day > summary::before { content: "+"; width: 9px; color: var(--faint); }
 .day[open] > summary::before { content: "–"; }
-.day > summary b { color: var(--paper); font-weight: 500; letter-spacing: .1em; }
+.day > summary b { color: var(--ink); font-weight: 500; letter-spacing: .1em; }
 .day > summary i { margin-left: auto; font-style: normal; color: var(--faint); }
 .day > summary i:hover { color: var(--signal); text-decoration: underline; }
 .day > summary:hover b { color: var(--signal); }
@@ -267,15 +398,15 @@ h1 {
 .stepact { margin-top: 13px; }
 .stepact .searchbar { max-width: 460px; }
 code {
-  font: 12px var(--mono); background: var(--raise); padding: 1px 5px;
+  font: 12px var(--mono); background: var(--rule-soft); padding: 1px 5px;
   border-radius: 3px;
 }
 
 /* --- search --------------------------------------------------------------- */
 .searchbar { display: flex; gap: 9px; margin: 0 0 26px; }
 .searchbar input {
-  flex: 1; background: var(--panel); border: 1px solid var(--rule);
-  border-radius: 4px; padding: 10px 13px; color: var(--paper);
+  flex: 1; background: var(--card); border: 1px solid var(--rule);
+  border-radius: 4px; padding: 10px 13px; color: var(--ink);
   font: 14px/1.5 var(--sans);
 }
 .searchbar input:focus {
@@ -297,7 +428,7 @@ code {
   color: var(--faint);
 }
 .ctl select, .toolbar .ghost {
-  appearance: none; background: var(--panel); color: var(--paper);
+  appearance: none; background: var(--card); color: var(--ink);
   border: 1px solid var(--rule); border-radius: 5px;
   padding: 4px 8px; font: 12px/1.4 var(--sans); cursor: pointer;
 }
@@ -316,22 +447,22 @@ code {
 .menu { position: relative; }
 .menu .pop {
   display: none; position: absolute; right: 0; top: calc(100% + 5px); z-index: 20;
-  background: var(--panel); border: 1px solid var(--rule); border-radius: 6px;
+  background: var(--card); border: 1px solid var(--rule); border-radius: 6px;
   padding: 4px; min-width: 210px;
   box-shadow: 0 6px 20px rgba(0, 0, 0, .28);
 }
 .menu.open .pop { display: block; }
 .menu .pop button {
   display: block; width: 100%; text-align: left; background: none; border: 0;
-  color: var(--paper); padding: 7px 10px; border-radius: 4px; cursor: pointer;
+  color: var(--ink); padding: 7px 10px; border-radius: 4px; cursor: pointer;
   font: 12.5px/1.4 var(--sans);
 }
-.menu .pop button:hover { background: var(--raise); }
+.menu .pop button:hover { background: var(--rule-soft); }
 
 /* --- strictness control -------------------------------------------------- */
 .bar-tool {
   border: 1px solid var(--rule); border-radius: 4px; padding: 15px 17px 17px;
-  margin-bottom: 24px; background: var(--panel);
+  margin-bottom: 24px; background: var(--card);
 }
 .bar-head {
   display: flex; justify-content: space-between; align-items: baseline;
@@ -341,7 +472,7 @@ code {
   font: 10px/1 var(--mono); letter-spacing: .16em; text-transform: uppercase;
   color: var(--faint);
 }
-.bar-head .now { font: 500 14px/1.3 var(--sans); color: var(--paper); }
+.bar-head .now { font: 500 14px/1.3 var(--sans); color: var(--ink); }
 .bar-head .cnt { font: 500 13px/1.3 var(--mono); color: var(--signal); }
 .bar-note { color: var(--muted); font-size: 12.5px; margin-bottom: 13px; min-height: 2.6em; }
 
@@ -352,11 +483,11 @@ input[type=range].slider {
 input[type=range].slider::-webkit-slider-thumb {
   -webkit-appearance: none; appearance: none; width: 15px; height: 15px;
   border-radius: 50%; background: var(--signal); cursor: pointer;
-  border: 3px solid var(--panel); box-shadow: 0 0 0 1px var(--signal);
+  border: 3px solid var(--card); box-shadow: 0 0 0 1px var(--signal);
 }
 input[type=range].slider::-moz-range-thumb {
   width: 15px; height: 15px; border-radius: 50%; background: var(--signal);
-  cursor: pointer; border: 3px solid var(--panel); box-shadow: 0 0 0 1px var(--signal);
+  cursor: pointer; border: 3px solid var(--card); box-shadow: 0 0 0 1px var(--signal);
 }
 input[type=range].slider:focus-visible { outline: 2px solid var(--signal); outline-offset: 4px; }
 .ticks {
@@ -375,7 +506,7 @@ input[type=range].slider:focus-visible { outline: 2px solid var(--signal); outli
   font: 500 66px/0.9 var(--mono); color: var(--signal); letter-spacing: -.04em;
 }
 .hero .t { font-size: 14.5px; color: var(--muted); max-width: 34ch; }
-.hero .t b { color: var(--paper); font-weight: 500; display: block; font-size: 15px; }
+.hero .t b { color: var(--ink); font-weight: 500; display: block; font-size: 15px; }
 
 .compo { margin-bottom: 10px; }
 /* One hue at varying lightness: these are parts of a whole, not identities,
@@ -392,7 +523,7 @@ input[type=range].slider:focus-visible { outline: 2px solid var(--signal); outli
 .legend2 div { display: flex; align-items: baseline; gap: 7px; color: var(--muted); }
 .legend2 i { width: 8px; height: 8px; border-radius: 2px; flex: 0 0 auto;
              transform: translateY(-1px); }
-.legend2 b { color: var(--paper); font-weight: 500; }
+.legend2 b { color: var(--ink); font-weight: 500; }
 
 /* --- schedule page ------------------------------------------------------- */
 .field { margin-bottom: 22px; }
@@ -406,15 +537,16 @@ input[type=range].slider:focus-visible { outline: 2px solid var(--signal); outli
   border: 1px solid var(--rule); padding: 9px 13px; cursor: pointer;
   font: 12px/1.4 var(--sans); color: var(--muted); border-radius: 3px;
 }
-.choice:hover { border-color: var(--muted); color: var(--paper); }
-.choice.on { border-color: var(--signal); color: var(--paper); background: var(--raise); }
-.choice b { display: block; font: 500 12.5px/1.4 var(--sans); color: var(--paper); }
+.choice:hover { border-color: var(--muted); color: var(--ink); }
+.choice.on { border-color: var(--signal); color: var(--ink); background: var(--rule-soft); }
+.choice b { display: block; font: 500 12.5px/1.4 var(--sans); color: var(--ink); }
 .choice span { font: 10.5px/1.4 var(--mono); color: var(--faint); }
 .times { display: flex; gap: 7px; flex-wrap: wrap; align-items: center; }
 .times input {
-  background: var(--ink); color: var(--paper); border: 1px solid var(--rule);
+  background: var(--card); color: var(--ink); border: 1px solid var(--rule);
   font: 12px var(--mono); padding: 7px 9px; border-radius: 3px; width: 92px;
 }
+.times input[type="number"] { width: 84px; }
 .times input:focus { outline: 1px solid var(--signal); }
 .stages-list { display: grid; gap: 2px; }
 .stg {
@@ -437,10 +569,10 @@ input[type=range].slider:focus-visible { outline: 2px solid var(--signal); outli
   border: 1px solid var(--rule); border-left: 2px solid var(--signal);
   padding: 11px 14px; margin-bottom: 22px; font-size: 13px; color: var(--muted);
 }
-.banner b { color: var(--paper); font-weight: 500; }
+.banner b { color: var(--ink); font-weight: 500; }
 .banner.warn { border-left-color: var(--rust); }
 .cmd {
-  font: 11px/1.6 var(--mono); color: var(--faint); background: var(--panel);
+  font: 11px/1.6 var(--mono); color: var(--faint); background: var(--card);
   border: 1px solid var(--rule); padding: 9px 11px; word-break: break-all;
   margin-top: 10px;
 }
@@ -452,7 +584,7 @@ button.act {
   padding: 5px 12px; cursor: pointer; border-radius: 3px;
   font: 11px/1.5 var(--mono); letter-spacing: .09em; text-transform: uppercase;
 }
-button.act:hover { color: var(--paper); border-color: var(--muted); }
+button.act:hover { color: var(--ink); border-color: var(--muted); }
 button.act.primary {
   background: var(--signal); border-color: var(--signal); color: var(--ink);
   font-weight: 600;
@@ -679,6 +811,7 @@ async function renderSchedule(wrap) {
   const running = st.installed > 0;
 
   wrap.innerHTML = `
+    <div class="wide">
     <h1>Schedule</h1>
     <p class="lede">When the pipeline runs on its own. Collection is the only
     stage that cannot be caught up later — a post that scrolls off the timeline
@@ -761,7 +894,8 @@ async function renderSchedule(wrap) {
     <p class="lede">A run on a schedule is only worth having if it can tell you.
     Findings are grouped by story first, so one release announced by six accounts
     arrives as one line with six sources.</p>
-    <div id="notifybox"></div>`;
+    <div id="notifybox"></div>
+    </div>`;
 
   paintSchedule();
   renderNotify();
@@ -869,6 +1003,7 @@ async function renderCurate(main) {
   CUR = JSON.parse(JSON.stringify(st.settings));
 
   main.innerHTML = `
+    <div class="wide">
     <h1>Self-curation</h1>
     <p class="lede">The tracked list can manage itself: add accounts the evidence
     supports, drop ones that have earned a long record of nothing. Every change is
@@ -925,7 +1060,8 @@ async function renderCurate(main) {
       ${st.history.map(h => `<div class="cmd" style="margin-top:6px">
         ${h.created_at.slice(0,16)} · ${h.action} @${esc(h.handle)} — ${esc(h.reason)}
         ${h.undone ? ' (undone)' : ''}</div>`).join('')}
-    </div>` : ''}`;
+    </div>` : ''}
+    </div>`;
 }
 
 function curToggle(k) { CUR[k] = !CUR[k]; api().curate_save(CUR).then(() => render()); }
@@ -1007,60 +1143,180 @@ async function loadLevels() {
   LEVEL_I = Math.max(0, LEVELS.findIndex(l => l.key === st.current.key));
 }
 
+
+/* ---- today --------------------------------------------------------------- */
+/* Three readings of one run. Assay is the funnel, ledger is every number the
+   run produced, poster is the one figure that matters with its context. They
+   share a single query so they cannot disagree by one. */
+let MODE = 'assay';
+let TODAY = null;
+
+function setMode(m) { MODE = m; render(); }
+
+function when_run(last) {
+  if (!last || !last.started_at) return 'never run';
+  const mins = (Date.now() - new Date(last.started_at)) / 60000;
+  if (mins < 90) return `last run ${Math.max(1, Math.round(mins))} min ago`;
+  if (mins < 60 * 36) return `last run ${Math.round(mins / 60)} h ago`;
+  return `last run ${Math.round(mins / 1440)} d ago`;
+}
+
+async function renderToday(main) {
+  TODAY = await api().today();
+  const d = TODAY;
+  const today = new Date();
+  const stamp = today.toLocaleDateString(undefined,
+    { weekday: 'long', day: 'numeric', month: 'long' });
+
+  main.innerHTML = `
+    <div class="pagehead">
+      <div>
+        <div class="when">${esc(stamp)} · ${esc(when_run(d.last_run))}</div>
+        <h1>Today</h1>
+      </div>
+      <div class="modes">
+        ${[['assay', 'Assay'], ['ledger', 'Ledger'], ['poster', 'Poster']].map(([k, l]) =>
+          `<button class="${MODE === k ? 'on' : ''}" onclick="setMode('${k}')">${l}</button>`).join('')}
+        <button class="go" onclick="stage('daily')">Run pipeline</button>
+      </div>
+    </div>
+    ${MODE === 'assay' ? assayView(d) : MODE === 'ledger' ? ledgerView(d) : posterView(d)}
+    <div class="pad"><div class="log" id="log" hidden></div></div>`;
+}
+
+function pct(a, b) { return b ? (a / b * 100) : 0; }
+
+function assayView(d) {
+  const rows = [
+    ['collected', d.collected, `${d.yields.length} sources`],
+    ['deduped', d.ledger[2].out, `${num(d.ledger[1].dropped + d.ledger[2].dropped)} said already or folded into a thread`],
+    ['admitted', d.ledger[3].out, `${num(d.ledger[3].dropped)} older than the window when collected`],
+    ['judged', d.judged, `${num(d.waiting)} still waiting`],
+    ['surfaced', d.surfaced, `${num(d.judged - d.surfaced)} scored below the bar, kept with the score`],
+  ];
+  const max = Math.max(...rows.map(r => r[1]), 1);
+  return `
+    <div class="band dark">
+      <div class="hero">
+        <div class="n">${num(d.surfaced)}</div>
+        <div class="t"><b>worth your time</b>
+          <span>Out of ${num(d.judged)} the judge ruled on — ${pct(d.surfaced, d.judged).toFixed(1)}%
+          of what it read. ${num(d.waiting)} still queued.</span></div>
+      </div>
+      <div class="figrow">
+        ${[[d.collected, 'collected'], [d.judged, 'judged'], [d.waiting, 'queued'],
+           [d.accounts, 'accounts tracked']].map(([v, l]) =>
+          `<div><b>${num(v)}</b><span>${l}</span></div>`).join('')}
+      </div>
+    </div>
+    <div class="pad funnel">
+      <div class="head">
+        <h2>${num(d.collected)} in, ${num(d.surfaced)} out</h2>
+        <div class="kicker" style="color:var(--muted)">The funnel, all time</div>
+      </div>
+      ${rows.map(([label, value, note], i) => `
+        <div class="frow ${i === 0 ? 'first' : ''} ${i === rows.length - 1 ? 'out' : ''}">
+          <div class="lab"><span>${label}</span><i>${esc(note)}</i></div>
+          <div class="bar">
+            <i style="width:${Math.max(0.4, pct(value, max))}%"></i>
+            <b>${num(value)}</b>
+          </div>
+        </div>`).join('')}
+    </div>`;
+}
+
+function ledgerView(d) {
+  return `<div class="wide-data">
+    <div class="lede">One ruled sheet: every number the run produced, and nothing
+      drawn that a figure would say better.</div>
+    <table class="sheet">
+      <thead><tr><th>Stage</th><th>In</th><th>Out</th><th>Dropped</th>
+        <th>Why they went</th></tr></thead>
+      <tbody>${d.ledger.map(r => `
+        <tr class="${r.stage === 'surface' ? 'out' : ''}">
+          <td>${r.stage}</td>
+          <td class="dim">${r.in === null ? '—' : num(r.in)}</td>
+          <td><b>${num(r.out)}</b></td>
+          <td class="dim">${r.dropped === null ? '—' : num(r.dropped)
+            + (r.dropped_label ? ' ' + r.dropped_label : '')}</td>
+          <td class="why">${esc(r.why)}</td>
+        </tr>`).join('')}</tbody>
+    </table>
+
+    <div class="cards" style="margin:30px 0 34px">
+      ${[[pct(d.surfaced, d.judged).toFixed(1) + '%', 'surfaced of judged', true],
+         ['$' + d.spend_month.toFixed(2), 'spent this month', false],
+         [num(d.accounts), 'accounts tracked', false],
+         [d.yields.length, 'sources read', false]].map(([v, l, red]) =>
+        `<div><b style="${red ? 'color:var(--signal)' : ''}">${v}</b>
+           <div class="k" style="color:var(--muted);margin:10px 0 0">${l}</div></div>`).join('')}
+    </div>
+
+    <h2 style="font:800 19px/1.2 var(--sans);letter-spacing:-.02em;margin:0 0 14px">Yield by source</h2>
+    <table class="sheet">
+      <thead><tr><th>Source</th><th>Collected</th><th>Judged</th><th>Surfaced</th>
+        <th style="text-align:right;padding-left:0">Mean value</th>
+        <th style="text-align:right;padding-left:0">Surface rate</th></tr></thead>
+      <tbody>${d.yields.map(y => `
+        <tr>
+          <td>${esc(y.platform)}</td>
+          <td class="dim">${num(y.collected)}</td>
+          <td class="dim">${num(y.judged)}</td>
+          <td><b style="${y.surfaced ? 'color:var(--signal)' : 'color:var(--faint)'}">${num(y.surfaced)}</b></td>
+          <td class="dim" style="text-align:right;padding-left:0">${
+            y.mean_value ? y.mean_value.toFixed(2) : '—'}</td>
+          <td style="text-align:right;padding-left:0;${y.rate ? 'color:var(--signal)' : 'color:var(--faint)'}"
+            >${y.rate.toFixed(1)}%</td>
+        </tr>`).join('')}</tbody>
+    </table>
+  </div>`;
+}
+
+function posterView(d) {
+  const days = [];
+  const byDay = Object.fromEntries((d.daily || []).map(r => [r.day, r.n]));
+  for (let i = 29; i >= 0; i--) {
+    const dt = new Date(Date.now() - i * 86400000);
+    const key = `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${
+      String(dt.getDate()).padStart(2, '0')}`;
+    days.push([key, byDay[key] || 0, i === 0]);
+  }
+  const peak = Math.max(...days.map(x => x[1]), 1);
+  const fb = d.feedback || {};
+  const cards = [
+    ['corroboration', num(d.corroborated), 'stories reported by more than one tracked account this week'],
+    ['queue', num(d.waiting), `waiting on the judge, at $${d.cost_per_post} each`],
+    ['spend', '$' + d.spend_month.toFixed(2), 'this month, judging only'],
+    ['roster', num(d.accounts), `accounts tracked · ${num(d.pending_promotions)} promotions pending`],
+    ['best source', d.best ? d.best.platform : '—',
+     d.best ? `${d.best.rate.toFixed(1)}% of what it submits to the judge surfaces` : 'not enough judged yet'],
+    ['calibration', num(fb.disagreements || 0), 'disagreements — the examples that teach it most'],
+  ];
+  return `
+    <div class="band red">
+      <div class="kicker">${num(d.collected)} collected · ${num(d.judged)} judged · ${num(d.surfaced)} surfaced</div>
+      <div class="hero">
+        <div class="n">${pct(d.surfaced, d.judged).toFixed(1)}%</div>
+        <div class="t"><b>of what the judge read was worth your time. The rest is
+          still in the database, with its reason.</b></div>
+      </div>
+    </div>
+    <div class="cards">
+      ${cards.map(([k, v, p]) => `<div><div class="k">${k}</div><b>${v}</b><p>${esc(p)}</p></div>`).join('')}
+    </div>
+    <div class="pad">
+      <div class="spark">${days.map(([key, n, isToday]) =>
+        `<i class="${isToday ? 'today' : ''}" style="height:${Math.max(2, n / peak * 100)}%"
+            title="${key}: ${n}"></i>`).join('')}</div>
+      <div class="sparkfoot"><span>Surfaced per day · 30 days</span><span>Today</span></div>
+    </div>`;
+}
+
 async function render() {
   const main = document.getElementById('main');
   main.innerHTML = '<div class="empty">reading database…</div>';
 
-  if (view === 'home') {
-    const o = await api().overview();
-    assay(o);
-    const f = o.funnel || {};
-
-    // Composition, not identity: every collected post is in exactly one of these
-    // states, so a single hue at varying lightness is the honest encoding. The
-    // survivors get the signal colour because they are the only ones you read.
-    const parts = [
-      ['surfaced',  o.surfaced || 0,        'var(--signal)', 'reached you'],
-      ['queued',    o.waiting || 0,         '#7d7466', 'waiting on the judge'],
-      ['duplicate', f.duplicate || 0,       '#5f584e', 'said already'],
-      ['thread',    f.thread_part || 0,     '#484239', 'folded into a thread'],
-      ['low value', f.low_value || 0,       '#382f28', 'judged not worth it'],
-      ['stale',     f.stale || 0,           '#332c26', 'older than the window'],
-      ['no text',   f.no_text || 0,         '#2a2622', 'link or emoji only'],
-    ].filter(p => p[1] > 0);
-    const total = parts.reduce((a, p) => a + p[1], 0) || 1;
-
-    main.innerHTML = `<div class="wide-data">
-      <h1>Today</h1>
-      <div class="lede">${num(o.posts)} posts collected from ${num(o.accounts)} tracked accounts.</div>
-
-      <div class="hero">
-        <div class="n">${num(o.surfaced)}</div>
-        <div class="t"><b>worth your time</b>
-          out of ${num(o.judged)} the judge has ruled on —
-          ${(o.surfaced / (o.judged || 1) * 100).toFixed(1)}% of what it read.
-          ${o.waiting ? `${num(o.waiting)} still queued.` : ''}</div>
-      </div>
-
-      <div class="compo">
-        <div class="bar2">${parts.map(([k, v, c]) =>
-          `<div class="seg" style="flex:${v};background:${c}" title="${k}: ${num(v)}"></div>`).join('')}</div>
-        <div class="legend2">${parts.map(([k, v, c, note]) =>
-          `<div><i style="background:${c}"></i><b>${num(v)}</b> ${esc(note)}</div>`).join('')}</div>
-      </div>
-
-      <p class="lede" style="margin-top:22px">Nothing is deleted — every dropped post keeps
-      its reason, so you can always ask what the filter threw away.</p>
-
-      <h1 style="font-size:15px;margin-top:30px">Calibration</h1>
-      <div class="lede" id="fbc">${o.feedback.good} useful · ${o.feedback.bad} not ·
-        ${o.feedback.disagreements} disagreements</div>
-      ${o.feedback.total === 0 ? `<div class="note">No ratings yet, so the judge is working
-        from a generic idea of what matters. Rate a handful under <b>Rate queue</b> — the ones
-        you disagree with are worth the most — and they become examples in its prompt.</div>` : ''}
-    </div>`;
-    return;
-  }
+  if (view === 'home') { return renderToday(main); }
 
   if (view === 'schedule') { return renderSchedule(main); }
   if (view === 'curate') { return renderCurate(main); }

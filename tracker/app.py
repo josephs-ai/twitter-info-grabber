@@ -29,6 +29,7 @@ from . import amplify, db, digest, feedback, health, novelty
 from . import cluster as cluster_mod
 from . import curate as curate_mod
 from . import search as search_mod
+from . import sources as sources_mod
 from . import schedule as schedule_mod
 from . import strictness as strict_mod
 
@@ -78,6 +79,104 @@ class Api:
                 "funnel": funnel,
                 "feedback": fb,
                 "last_run": scalar("SELECT COUNT(*) FROM runs"),
+            }
+        finally:
+            conn.close()
+
+    def today(self) -> dict:
+        """Everything the Today page reports, in one round trip.
+
+        The three views are three readings of one run — the funnel, the ledger
+        and the poster — so they share a query rather than each inventing their
+        own arithmetic and disagreeing by one.
+        """
+        conn = self._conn()
+        try:
+            def scalar(sql, *a):
+                row = conn.execute(sql, a).fetchone()
+                return (row[0] if row else 0) or 0
+
+            where, bar = strict_mod.clause(strict_mod.load(conn))
+            drops = {r["r"]: r["n"] for r in conn.execute(
+                "SELECT COALESCE(drop_reason, stage) r, COUNT(*) n FROM triage GROUP BY r")}
+
+            collected = scalar("SELECT COUNT(*) FROM posts")
+            judged = scalar("SELECT COUNT(DISTINCT post_id) FROM judgements")
+            surfaced = scalar(f"SELECT COUNT(DISTINCT post_id) FROM judgements j WHERE {where}", *bar)
+            waiting = judge_mod.backlog(conn)["waiting"]
+
+            threaded = drops.get("thread_part", 0)
+            duped = drops.get("duplicate", 0)
+            held = (drops.get("backfill", 0) + drops.get("stale", 0)
+                    + drops.get("no_text", 0))
+            after_threads = collected - threaded
+            after_dedup = after_threads - duped
+            admitted = after_dedup - held
+
+            yields = []
+            for r in conn.execute(
+                f"""
+                SELECT p.platform,
+                       COUNT(DISTINCT p.id) collected,
+                       COUNT(DISTINCT j.post_id) judged,
+                       COUNT(DISTINCT CASE WHEN {where} THEN j.post_id END) surfaced,
+                       AVG(j.value) mean_value
+                FROM posts p LEFT JOIN judgements j ON j.post_id = p.id
+                GROUP BY p.platform ORDER BY surfaced DESC, collected DESC
+                """, bar):
+                row = dict(r)
+                row["rate"] = (row["surfaced"] / row["judged"] * 100) if row["judged"] else 0.0
+                yields.append(row)
+            best = max((y for y in yields if y["judged"] >= 10),
+                       key=lambda y: y["rate"], default=None)
+
+            # Stage-by-stage, with what each one turned away and why.
+            ledger = [
+                # Counted from what is actually in the corpus, not from the
+                # registry: `cn` is one entry covering two platforms.
+                {"stage": "collect", "in": None, "out": collected, "dropped": None,
+                 "why": f"{len(yields)} sources"},
+                {"stage": "threads", "in": collected, "out": after_threads,
+                 "dropped": threaded, "why": "folded into the thread that leads them"},
+                {"stage": "dedup", "in": after_threads, "out": after_dedup,
+                 "dropped": duped, "why": "said already — max lexical/semantic similarity"},
+                {"stage": "admit", "in": after_dedup, "out": admitted, "dropped": held,
+                 "why": "older than the window when collected, or link and emoji only"},
+                {"stage": "judge", "in": admitted, "out": judged, "dropped": waiting,
+                 "dropped_label": "waiting", "why": "metered — the one stage that costs money"},
+                {"stage": "surface", "in": judged, "out": surfaced,
+                 "dropped": max(0, judged - surfaced),
+                 "why": "scored below the bar; kept with the score"},
+            ]
+
+            # Judging is billed per post, so the month's spend is a count.
+            month = scalar("SELECT COUNT(*) FROM judgements "
+                           "WHERE created_at > datetime('now','start of month')")
+            daily = [dict(r) for r in conn.execute(
+                f"""
+                SELECT date(p.created_at) day, COUNT(DISTINCT j.post_id) n
+                FROM judgements j JOIN posts p ON p.id = j.post_id
+                WHERE {where} AND p.created_at > datetime('now','-30 days')
+                GROUP BY day ORDER BY day
+                """, bar)]
+            last = conn.execute(
+                "SELECT started_at, status FROM runs ORDER BY id DESC LIMIT 1").fetchone()
+
+            return {
+                "collected": collected, "judged": judged, "surfaced": surfaced,
+                "waiting": waiting,
+                "accounts": scalar("SELECT COUNT(*) FROM accounts WHERE active=1"),
+                "pending_promotions": scalar(
+                    "SELECT COUNT(*) FROM candidates WHERE status='new' AND seed_count >= 4"),
+                "corroborated": scalar(
+                    "SELECT COUNT(*) FROM posts WHERE amplifiers >= 2 "
+                    "AND created_at > datetime('now','-7 days')"),
+                "ledger": ledger, "yields": yields, "best": best,
+                "spend_month": round(month * schedule_mod.COST_PER_POST, 2),
+                "cost_per_post": schedule_mod.COST_PER_POST,
+                "daily": daily,
+                "feedback": feedback.stats(conn),
+                "last_run": dict(last) if last else None,
             }
         finally:
             conn.close()
